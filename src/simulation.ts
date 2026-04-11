@@ -76,8 +76,10 @@ type MetricRange = [number, number];
 type MetricRanges = Record<MetricKey, MetricRange>;
 
 const UPDATE_INTERVAL_MS = 320;
-const HISTORY_LENGTH = 32;
+const HISTORY_LENGTH = 64;
 const EMA_FACTOR = 0.12;
+const VITAL_TIME_SCALE = 0.5;
+const GAIT_TRANSITION_FACTOR = 0.035;
 
 const METRIC_META: Array<
   Omit<MetricState, "value" | "history" | "displayRange" | "status"> & { initial: number }
@@ -88,7 +90,7 @@ const METRIC_META: Array<
     unit: "bpm",
     shortUnit: "bpm",
     initial: 33,
-    decimals: 0,
+    decimals: 1,
     color: "#72f3ff",
   },
   {
@@ -97,7 +99,7 @@ const METRIC_META: Array<
     unit: "b/m",
     shortUnit: "b/m",
     initial: 11,
-    decimals: 0,
+    decimals: 1,
     color: "#7aecff",
   },
   {
@@ -115,7 +117,7 @@ const METRIC_META: Array<
     unit: "mg/dL",
     shortUnit: "mg/dL",
     initial: 92,
-    decimals: 0,
+    decimals: 1,
     color: "#71f3ed",
   },
   {
@@ -144,6 +146,14 @@ const BASE_RANGES: Record<GaitMode, MetricRanges> = {
     glucose: [99, 103],
     temperature: [39.3, 39.6],
   },
+};
+
+const GRAPH_MIN_SPAN: Record<MetricKey, number> = {
+  heartRate: 4,
+  respiration: 1.2,
+  lactate: 0.18,
+  glucose: 4,
+  temperature: 0.18,
 };
 
 const SCENE_RANGE_ADJUSTMENTS: Record<DemoScene, Partial<MetricRanges>> = {
@@ -281,6 +291,24 @@ const STRIDE_PHASE_OFFSET: Record<GaitMode, number> = {
   gallop: 0.16,
 };
 
+const TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  month: "short",
+  day: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+const EVENT_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 const GAIT_PATTERNS: Record<GaitMode, Record<keyof HoofLoads, { start: number; end: number }>> = {
   walk: {
     LH: { start: 0.0, end: 0.62 },
@@ -308,17 +336,12 @@ function lerp(current: number, target: number, factor: number) {
   return current + (target - current) * factor;
 }
 
+function interpolateRange(start: MetricRange, end: MetricRange, amount: number): MetricRange {
+  return [lerp(start[0], end[0], amount), lerp(start[1], end[1], amount)];
+}
+
 function formatTimestamp(date: Date) {
-  return date.toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+  return TIMESTAMP_FORMATTER.format(date);
 }
 
 function formatSession(elapsedMs: number) {
@@ -338,15 +361,30 @@ function addRange(base: MetricRange, adjustment?: MetricRange): MetricRange {
   return [base[0] + adjustment[0], base[1] + adjustment[1]];
 }
 
-function sceneRanges(mode: GaitMode, scene: DemoScene): MetricRanges {
+function sceneRanges(gaitBlend: number, scene: DemoScene): MetricRanges {
   const adjustment = SCENE_RANGE_ADJUSTMENTS[scene];
 
   return {
-    heartRate: addRange(BASE_RANGES[mode].heartRate, adjustment.heartRate),
-    respiration: addRange(BASE_RANGES[mode].respiration, adjustment.respiration),
-    lactate: addRange(BASE_RANGES[mode].lactate, adjustment.lactate),
-    glucose: addRange(BASE_RANGES[mode].glucose, adjustment.glucose),
-    temperature: addRange(BASE_RANGES[mode].temperature, adjustment.temperature),
+    heartRate: addRange(
+      interpolateRange(BASE_RANGES.walk.heartRate, BASE_RANGES.gallop.heartRate, gaitBlend),
+      adjustment.heartRate
+    ),
+    respiration: addRange(
+      interpolateRange(BASE_RANGES.walk.respiration, BASE_RANGES.gallop.respiration, gaitBlend),
+      adjustment.respiration
+    ),
+    lactate: addRange(
+      interpolateRange(BASE_RANGES.walk.lactate, BASE_RANGES.gallop.lactate, gaitBlend),
+      adjustment.lactate
+    ),
+    glucose: addRange(
+      interpolateRange(BASE_RANGES.walk.glucose, BASE_RANGES.gallop.glucose, gaitBlend),
+      adjustment.glucose
+    ),
+    temperature: addRange(
+      interpolateRange(BASE_RANGES.walk.temperature, BASE_RANGES.gallop.temperature, gaitBlend),
+      adjustment.temperature
+    ),
   };
 }
 
@@ -356,46 +394,101 @@ function pushHistory(history: number[], value: number) {
   return next;
 }
 
+function computeGraphRange(metricKey: MetricKey, history: number[]): MetricRange {
+  if (!history.length) {
+    return BASE_RANGES.walk[metricKey];
+  }
+
+  const historyMin = Math.min(...history);
+  const historyMax = Math.max(...history);
+  const historySpan = historyMax - historyMin;
+  const span = Math.max(historySpan * 1.3, GRAPH_MIN_SPAN[metricKey]);
+  const center = (historyMin + historyMax) / 2;
+
+  return [center - span / 2, center + span / 2];
+}
+
+function roundToDecimals(value: number, decimals: number) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
 function sinusoidalNoise(
   tick: number,
   metricKey: MetricKey,
-  mode: GaitMode,
+  gaitBlend: number,
   scene: DemoScene
 ) {
-  const amplitude = NOISE_AMPLITUDE[scene][mode][metricKey];
+  const scaledTick = tick * VITAL_TIME_SCALE;
+  const amplitude = lerp(
+    NOISE_AMPLITUDE[scene].walk[metricKey],
+    NOISE_AMPLITUDE[scene].gallop[metricKey],
+    gaitBlend
+  );
   const metricIndex = METRIC_META.findIndex((metric) => metric.key === metricKey) + 1;
-  const base =
-    Math.sin(tick * 0.16 + metricIndex * 0.8) * amplitude +
-    Math.cos(tick * 0.047 + metricIndex * 1.9) * amplitude * 0.45 +
-    Math.sin(tick * 0.34 + metricIndex * 1.25) * amplitude * 0.2;
+  let base = 0;
+
+  switch (metricKey) {
+    case "heartRate":
+      base =
+        Math.sin(scaledTick * 0.14 + metricIndex * 0.7) * amplitude +
+        Math.cos(scaledTick * 0.052 + metricIndex * 1.7) * amplitude * 0.4 +
+        Math.sin(scaledTick * 0.33 + metricIndex) * amplitude * 0.14;
+      break;
+    case "respiration":
+      base =
+        Math.sin(scaledTick * 0.1 + metricIndex * 0.9) * amplitude * 0.9 +
+        Math.cos(scaledTick * 0.038 + metricIndex * 1.5) * amplitude * 0.36;
+      break;
+    case "lactate":
+      base =
+        Math.sin(scaledTick * 0.078 + metricIndex * 0.66) * amplitude * 0.58 +
+        Math.cos(scaledTick * 0.026 + metricIndex * 1.28) * amplitude * 0.24;
+      break;
+    case "glucose":
+      base =
+        Math.sin(scaledTick * 0.115 + metricIndex * 0.82) * amplitude * 0.84 +
+        Math.cos(scaledTick * 0.044 + metricIndex * 1.58) * amplitude * 0.42;
+      break;
+    case "temperature":
+      base =
+        Math.sin(scaledTick * 0.082 + metricIndex * 0.72) * amplitude * 0.52 +
+        Math.cos(scaledTick * 0.024 + metricIndex * 1.18) * amplitude * 0.18;
+      break;
+  }
 
   if (scene === "mild-stress" && ["heartRate", "lactate", "temperature"].includes(metricKey)) {
-    return base + Math.sin(tick * 0.5 + metricIndex) * amplitude * 0.3;
+    return base + Math.sin(scaledTick * 0.5 + metricIndex) * amplitude * 0.3;
   }
 
   return base;
 }
 
 function createBaselineMetrics() {
-  return METRIC_META.map((metric) => ({
-    ...metric,
-    value: metric.initial,
-    history: Array.from({ length: HISTORY_LENGTH }, (_, index) => {
+  return METRIC_META.map((metric) => {
+    const history = Array.from({ length: HISTORY_LENGTH }, (_, index) => {
       const amplitude = NOISE_AMPLITUDE["healthy-walk"].walk[metric.key];
       const phase = index - HISTORY_LENGTH;
-      return (
+      const seededValue =
         metric.initial +
         Math.sin(phase * 0.32 + (METRIC_META.findIndex((entry) => entry.key === metric.key) + 1) * 0.8) *
           amplitude *
           0.82 +
         Math.cos(phase * 0.11 + (METRIC_META.findIndex((entry) => entry.key === metric.key) + 1) * 1.6) *
           amplitude *
-          0.28
-      );
-    }),
-    displayRange: BASE_RANGES.walk[metric.key],
-    status: "healthy" as StatusLevel,
-  }));
+          0.28;
+
+      return roundToDecimals(seededValue, metric.decimals);
+    });
+
+    return {
+      ...metric,
+      value: roundToDecimals(metric.initial, metric.decimals),
+      history,
+      displayRange: computeGraphRange(metric.key, history),
+      status: "healthy" as StatusLevel,
+    };
+  });
 }
 
 function inWrappedWindow(phase: number, start: number, end: number) {
@@ -435,12 +528,33 @@ function metricStatus(
   key: MetricKey,
   value: number,
   ranges: MetricRanges,
-  scene: DemoScene
+  scene: DemoScene,
+  gaitBlend: number
 ): StatusLevel {
   const [min, max] = ranges[key];
 
   if (scene === "mild-stress" && ["heartRate", "lactate", "temperature"].includes(key)) {
     return "watch";
+  }
+
+  if (
+    (scene === "healthy-walk" || scene === "healthy-gallop") &&
+    gaitBlend > 0.02 &&
+    gaitBlend < 0.98
+  ) {
+    const transitionMin = Math.min(BASE_RANGES.walk[key][0], BASE_RANGES.gallop[key][0]);
+    const transitionMax = Math.max(BASE_RANGES.walk[key][1], BASE_RANGES.gallop[key][1]);
+    const transitionSpan = transitionMax - transitionMin || 1;
+
+    if (value < transitionMin - transitionSpan * 0.35 || value > transitionMax + transitionSpan * 0.35) {
+      return "alert";
+    }
+
+    if (value < transitionMin || value > transitionMax) {
+      return "watch";
+    }
+
+    return "healthy";
   }
 
   if (value < min - (max - min) * 0.8 || value > max + (max - min) * 0.8) {
@@ -485,13 +599,14 @@ export function useDashboardSimulation(): SimulationState {
 
   const startedAtRef = useRef(Date.now());
   const tickRef = useRef(0);
+  const gaitBlendRef = useRef(0);
 
   const appendEvent = useCallback((kind: EventKind, label: string, severityLabel?: string) => {
     setEvents((current) =>
       [
         {
           id: `${kind}-${Date.now()}-${label}`,
-          timeLabel: new Date().toLocaleTimeString("en-US", { hour12: false }),
+          timeLabel: EVENT_TIME_FORMATTER.format(new Date()),
           kind,
           label,
           severityLabel,
@@ -539,6 +654,7 @@ export function useDashboardSimulation(): SimulationState {
   const reset = useCallback(() => {
     startedAtRef.current = Date.now();
     tickRef.current = 0;
+    gaitBlendRef.current = 0;
     setElapsedMs(0);
     setTimestampLabel(formatTimestamp(new Date()));
     setMetrics(createBaselineMetrics());
@@ -554,15 +670,19 @@ export function useDashboardSimulation(): SimulationState {
   useEffect(() => {
     const interval = window.setInterval(() => {
       tickRef.current += 1;
+      const gaitTarget = mode === "gallop" ? 1 : 0;
+      const nextGaitBlend = lerp(gaitBlendRef.current, gaitTarget, GAIT_TRANSITION_FACTOR);
+      gaitBlendRef.current =
+        Math.abs(nextGaitBlend - gaitTarget) < 0.001 ? gaitTarget : nextGaitBlend;
       setElapsedMs(Date.now() - startedAtRef.current);
       setTimestampLabel(formatTimestamp(new Date()));
 
       setMetrics((currentMetrics) => {
-        const ranges = sceneRanges(mode, scene);
+        const ranges = sceneRanges(gaitBlendRef.current, scene);
 
         return currentMetrics.map((metric) => {
           const target = midpoint(ranges[metric.key]);
-          const noise = sinusoidalNoise(tickRef.current, metric.key, mode, scene);
+          const noise = sinusoidalNoise(tickRef.current, metric.key, gaitBlendRef.current, scene);
           const nextValue = lerp(metric.value, target + noise, EMA_FACTOR);
 
           const clamped =
@@ -573,15 +693,17 @@ export function useDashboardSimulation(): SimulationState {
                 : metric.key === "lactate"
                   ? clamp(nextValue, 0.4, 8)
                   : metric.key === "glucose"
-                    ? clamp(nextValue, 60, 170)
+                  ? clamp(nextValue, 60, 170)
                     : clamp(nextValue, 37.5, 40.6);
+          const displayedValue = roundToDecimals(clamped, metric.decimals);
+          const nextHistory = pushHistory(metric.history, displayedValue);
 
           return {
             ...metric,
-            value: clamped,
-            history: pushHistory(metric.history, clamped),
-            displayRange: ranges[metric.key],
-            status: metricStatus(metric.key, clamped, ranges, scene),
+            value: displayedValue,
+            history: nextHistory,
+            displayRange: computeGraphRange(metric.key, nextHistory),
+            status: metricStatus(metric.key, displayedValue, ranges, scene, gaitBlendRef.current),
           };
         });
       });
@@ -590,11 +712,14 @@ export function useDashboardSimulation(): SimulationState {
     return () => window.clearInterval(interval);
   }, [mode, scene]);
 
+  const gaitBlend = gaitBlendRef.current;
+
   const stridePhase = useMemo(() => {
-    const duration = STRIDE_DURATION_MS[mode];
+    const duration = lerp(STRIDE_DURATION_MS.walk, STRIDE_DURATION_MS.gallop, gaitBlend);
+    const phaseOffset = lerp(STRIDE_PHASE_OFFSET.walk, STRIDE_PHASE_OFFSET.gallop, gaitBlend);
     const elapsed = Date.now() - startedAtRef.current;
-    return (((elapsed % duration) / duration) + STRIDE_PHASE_OFFSET[mode]) % 1;
-  }, [elapsedMs, mode]);
+    return (((elapsed % duration) / duration) + phaseOffset) % 1;
+  }, [elapsedMs, gaitBlend]);
 
   const hoofLoads = useMemo(() => getHoofLoads(mode, stridePhase), [mode, stridePhase]);
 
@@ -609,11 +734,16 @@ export function useDashboardSimulation(): SimulationState {
   const status = useMemo(() => SCENE_STATUS[scene], [scene]);
   const summaryText = useMemo(() => SCENE_SUMMARY[scene], [scene]);
 
-  const strideFrequencyLabel = mode === "walk" ? "1.14 s/m" : "0.45 s/m";
-  const contactSummary =
-    mode === "walk"
-      ? "LF(0.20s), RF(0.21s), LH(0.19s), RH(0.20s)"
-      : "LF(0.15s), RF(0.15s), LH(0.15s), RH(0.15s)";
+  const strideFrequencyLabel = `${lerp(1.14, 0.45, gaitBlend).toFixed(2)} s/m`;
+  const contactSummary = `LF(${lerp(0.2, 0.15, gaitBlend).toFixed(2)}s), RF(${lerp(
+    0.21,
+    0.15,
+    gaitBlend
+  ).toFixed(2)}s), LH(${lerp(0.19, 0.15, gaitBlend).toFixed(2)}s), RH(${lerp(
+    0.2,
+    0.15,
+    gaitBlend
+  ).toFixed(2)}s)`;
 
   return {
     mode,

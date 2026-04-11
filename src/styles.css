@@ -158,6 +158,7 @@ select {
   font-size: clamp(1.8rem, 2.45vw, 3.55rem);
   font-weight: 650;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
 .status-pill {
@@ -255,6 +256,7 @@ select {
   margin: 0;
   color: rgba(246, 248, 255, 0.78);
   font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .wordmark {
@@ -411,8 +413,7 @@ select {
 }
 
 .horse-grid-overlay,
-.horse-vignette,
-.sensor-overlay {
+.horse-vignette {
   position: absolute;
   inset: 0;
 }
@@ -430,29 +431,6 @@ select {
   background:
     radial-gradient(circle at center, transparent 54%, rgba(3, 8, 16, 0.6) 100%),
     linear-gradient(180deg, rgba(4, 10, 18, 0.12), rgba(3, 9, 16, 0.4));
-}
-
-.sensor-node {
-  position: absolute;
-  left: var(--node-x);
-  top: var(--node-y);
-  width: calc(14px * var(--node-scale));
-  height: calc(14px * var(--node-scale));
-  transform: translate(-50%, -50%);
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(195, 255, 255, 0.95), rgba(55, 240, 255, 0.7) 62%, rgba(55, 240, 255, 0.08) 100%);
-  box-shadow:
-    0 0 calc(10px * var(--node-scale)) rgba(88, 247, 255, 0.95),
-    0 0 calc(28px * var(--node-scale)) rgba(88, 247, 255, 0.32);
-  animation: sensorPulse 2.4s ease-in-out infinite;
-}
-
-.sensor-node::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-  border-radius: inherit;
-  border: 1px solid rgba(114, 246, 255, 0.24);
 }
 
 .command-chip {
@@ -501,6 +479,7 @@ select {
   font-size: clamp(1.55rem, 1.72vw, 2.55rem);
   font-weight: 600;
   letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-value small {
@@ -594,6 +573,7 @@ select {
   color: rgba(233, 240, 255, 0.72);
   font-size: 0.88rem;
   letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 
 .stride-summary {
@@ -624,6 +604,7 @@ select {
   color: rgba(236, 245, 255, 0.94);
   font-size: 1rem;
   line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
 
 .phase-track {
@@ -678,8 +659,9 @@ select {
   min-height: 72px;
   padding: 10px 14px 9px;
   border-radius: 18px;
-  border: 1px solid rgba(145, 240, 177, 0.14);
+  border: 1px solid rgba(145, 240, 177, 0.1);
   background: linear-gradient(180deg, rgba(19, 54, 41, 0.92), rgba(14, 41, 34, 0.84));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .score-card--watch {
@@ -697,6 +679,7 @@ select {
   align-items: baseline;
   gap: 8px;
   color: #8bf7a7;
+  font-variant-numeric: tabular-nums;
 }
 
 .score-card--watch .score-card__value {
@@ -725,7 +708,8 @@ select {
   align-content: start;
   min-height: 72px;
   padding: 10px 14px 9px;
-  background: linear-gradient(180deg, rgba(9, 15, 30, 0.96), rgba(8, 12, 24, 0.92));
+  border-color: rgba(139, 181, 255, 0.08);
+  background: linear-gradient(180deg, rgba(9, 15, 30, 0.9), rgba(8, 12, 24, 0.84));
 }
 
 .summary-card__copy {
@@ -746,8 +730,9 @@ select {
   gap: 6px;
   min-height: 54px;
   padding: 8px 11px 7px;
+  border: 1px solid rgba(139, 181, 255, 0.08);
   background: linear-gradient(180deg, rgba(6, 9, 19, 0.995), rgba(5, 8, 17, 0.985));
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 
 .alert-log .micro-label {
@@ -768,6 +753,12 @@ select {
   font-family: "SF Mono", "IBM Plex Mono", monospace;
   font-size: 0.64rem;
   line-height: 1.08;
+  font-variant-numeric: tabular-nums;
+}
+
+.hoof-blob,
+.hoof-accent {
+  transition: opacity 260ms ease-out;
 }
 
 .alert-time {
@@ -809,13 +800,10 @@ select {
   font-weight: 600;
 }
 
-@keyframes sensorPulse {
-  0%,
-  100% {
-    transform: translate(-50%, -50%) scale(0.96);
-  }
-  50% {
-    transform: translate(-50%, -50%) scale(1.08);
+@media (prefers-reduced-motion: reduce) {
+  .hoof-blob,
+  .hoof-accent {
+    transition: none;
   }
 }
 
@@ -1011,5 +999,134 @@ select {
 
   .alert-row {
     font-size: 0.62rem;
+  }
+}
+
+@media (max-height: 740px) {
+  :root {
+    --frame-gap: 8px;
+    --panel-pad: 11px;
+    --topbar-pad-inline: 16px;
+    --topbar-pad-block: 11px;
+    --metric-meta-width: 138px;
+    --sidebar-width: 148px;
+  }
+
+  .topbar {
+    min-height: 68px;
+    gap: 12px;
+  }
+
+  .topbar-title-row h1 {
+    font-size: clamp(1.7rem, 2.25vw, 2.8rem);
+  }
+
+  .panel-heading {
+    margin-bottom: 8px;
+  }
+
+  .circle-video {
+    width: 56px;
+    height: 56px;
+  }
+
+  .horse-panel-content {
+    gap: 10px;
+  }
+
+  .stat-card {
+    padding: 11px 12px 12px;
+  }
+
+  .stat-card-value span:first-child {
+    font-size: 2rem;
+  }
+
+  .metric-value {
+    font-size: clamp(1.42rem, 1.45vw, 2rem);
+  }
+
+  .metric-value small {
+    font-size: 0.82rem;
+  }
+
+  .vitals-panel {
+    padding: 10px;
+  }
+
+  .metric-list {
+    gap: 4px;
+  }
+
+  .metric-row {
+    gap: 8px;
+  }
+
+  .sparkline {
+    height: 46px;
+  }
+
+  .mini-status {
+    min-width: 78px;
+    padding: 6px 10px;
+    font-size: 0.74rem;
+  }
+
+  .vitals-footer {
+    margin-top: 10px;
+    font-size: 0.74rem;
+  }
+
+  .hoof-glyph {
+    width: 84px;
+    height: 102px;
+  }
+
+  .hoof-label {
+    font-size: 0.8rem;
+  }
+
+  .stride-details {
+    gap: 5px;
+    margin: 0 0 8px;
+  }
+
+  .stride-details dt {
+    font-size: 0.74rem;
+  }
+
+  .stride-details dd {
+    font-size: 0.88rem;
+  }
+
+  .score-card,
+  .summary-card {
+    min-height: 66px;
+    padding: 8px 10px 7px;
+  }
+
+  .score-card__value strong {
+    font-size: clamp(1.9rem, 2.1vw, 2.25rem);
+  }
+
+  .score-card__value span {
+    font-size: 0.92rem;
+  }
+
+  .summary-card p {
+    font-size: 0.68rem;
+  }
+
+  .alert-log {
+    min-height: 42px;
+    padding: 7px 9px 6px;
+  }
+
+  .alert-log .micro-label {
+    font-size: 0.62rem;
+  }
+
+  .alert-row {
+    font-size: 0.58rem;
   }
 }

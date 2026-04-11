@@ -3,7 +3,6 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  type CSSProperties,
 } from "react";
 import { interpolateRgbBasis } from "d3-interpolate";
 import { scaleSequential } from "d3-scale";
@@ -51,15 +50,6 @@ type HoofAccentShape =
   | { kind: "path"; d: string; weight: number }
   | { kind: "ellipse"; cx: number; cy: number; rx: number; ry: number; weight: number };
 
-const SENSOR_POINTS = [
-  { x: 36, y: 35, scale: 0.92 },
-  { x: 46, y: 29, scale: 1.06 },
-  { x: 52, y: 33, scale: 0.9 },
-  { x: 58, y: 41, scale: 0.88 },
-  { x: 36, y: 66, scale: 0.86 },
-  { x: 57, y: 72, scale: 0.82 },
-];
-
 const pressureColorScale = scaleSequential(
   interpolateRgbBasis(["#071221", "#0f3549", "#26c7da", "#dffcff"])
 ).domain([0, 1]);
@@ -73,10 +63,10 @@ const HOOF_FROG_PATH =
 
 const HOOF_BLOB_LAYOUTS: Record<keyof HoofLoads, PressureBlob[]> = {
   LF: [
-    { x: 59, y: 44, rx: 23, ry: 26, weight: 0.8 },
-    { x: 46, y: 72, rx: 13, ry: 17, weight: 0.78 },
-    { x: 67, y: 66, rx: 12, ry: 16, weight: 0.42 },
-    { x: 39, y: 38, rx: 7, ry: 11, weight: 0.34 },
+    { x: 58, y: 46, rx: 21, ry: 24, weight: 0.36 },
+    { x: 48, y: 88, rx: 12, ry: 15, weight: 0.72 },
+    { x: 39, y: 41, rx: 6, ry: 10, weight: 0.26 },
+    { x: 66, y: 68, rx: 10, ry: 15, weight: 0.22 },
   ],
   RF: [
     { x: 60, y: 41, rx: 26, ry: 29, weight: 0.96 },
@@ -100,9 +90,9 @@ const HOOF_BLOB_LAYOUTS: Record<keyof HoofLoads, PressureBlob[]> = {
 
 const HOOF_ACCENT_SHAPES: Record<keyof HoofLoads, HoofAccentShape[]> = {
   LF: [
-    { kind: "path", d: "M35 38 C43 23 75 24 85 41 C82 60 72 79 60 93 C47 80 39 61 35 38 Z", weight: 0.48 },
-    { kind: "ellipse", cx: 46, cy: 88, rx: 11, ry: 14, weight: 0.68 },
-    { kind: "ellipse", cx: 39, cy: 40, rx: 5, ry: 10, weight: 0.34 },
+    { kind: "path", d: "M36 38 C43 25 74 24 84 41 C81 58 72 77 61 91 C48 79 40 60 36 38 Z", weight: 0.22 },
+    { kind: "ellipse", cx: 47, cy: 89, rx: 11, ry: 14, weight: 0.74 },
+    { kind: "ellipse", cx: 39, cy: 40, rx: 4, ry: 9, weight: 0.22 },
   ],
   RF: [
     { kind: "path", d: "M32 35 C41 20 79 21 89 39 C86 63 75 83 60 97 C46 82 35 61 32 35 Z", weight: 1.02 },
@@ -128,11 +118,26 @@ const HOOF_VISUAL_PROFILE: Record<
   keyof HoofLoads,
   { floor: number; intensityScale: number; accentScale: number }
 > = {
-  LF: { floor: 0.03, intensityScale: 0.58, accentScale: 0.62 },
+  LF: { floor: 0.01, intensityScale: 0.42, accentScale: 0.42 },
   RF: { floor: 0.08, intensityScale: 1.04, accentScale: 1.04 },
   LH: { floor: 0.1, intensityScale: 1.1, accentScale: 1.16 },
-  RH: { floor: 0.02, intensityScale: 0.46, accentScale: 0.46 },
+  RH: { floor: 0.02, intensityScale: 0.4, accentScale: 0.4 },
 };
+
+const INTEGER_FORMATTER = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 0,
+});
+
+const ONE_DECIMAL_FORMATTER = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+function formatNumber(value: number, decimals: number) {
+  return decimals === 0
+    ? INTEGER_FORMATTER.format(value)
+    : ONE_DECIMAL_FORMATTER.format(value);
+}
 
 function App() {
   const simulation = useDashboardSimulation();
@@ -238,7 +243,7 @@ function TopBar({
         </div>
       </div>
 
-      <div className="topbar-center">
+      <div className="topbar-center" aria-hidden="true">
         <CircularVideo videoSrc={videoSrc} />
         <CircularVideo videoSrc={videoSrc} delayed />
       </div>
@@ -247,15 +252,16 @@ function TopBar({
         <div>
           <p className="micro-label">Horse</p>
           <p className="profile-line">
-            {profile.name} / {profile.breed} / {profile.age}
+            <span translate="no">{profile.name}</span> /{" "}
+            <span translate="no">{profile.breed}</span> / {profile.age}
           </p>
         </div>
       </div>
 
       <div className="topbar-meta">
         <p>{timestampLabel}</p>
-        <div className="wordmark">
-          <span className="wordmark-mark" />
+        <div className="wordmark" translate="no">
+          <span className="wordmark-mark" aria-hidden="true" />
           <div>
             <p>Vetter</p>
             <p className="muted-line">{mode.toUpperCase()} DEMO {muted ? "MUTED" : "LIVE"}</p>
@@ -290,7 +296,7 @@ function CircularVideo({
 function StatusPill({ status }: { status: StatusLevel }) {
   return (
     <div className={`status-pill status-pill--${status}`}>
-      <span className="status-dot" />
+      <span className="status-dot" aria-hidden="true" />
       {STATUS_LABELS[status]}
     </div>
   );
@@ -311,7 +317,7 @@ function HorsePanel({
     <section className="panel horse-panel">
       <div className="panel-heading">
         <h2>3D Horse Simulation</h2>
-        <span className="panel-hint panel-hint--icon">?</span>
+        <span className="panel-hint panel-hint--icon" aria-hidden="true">?</span>
       </div>
 
       <div className="horse-panel-content">
@@ -341,21 +347,6 @@ function HorsePanel({
             />
             <div className="horse-grid-overlay" />
             <div className="horse-vignette" />
-            <div className="sensor-overlay">
-              {SENSOR_POINTS.map((point, index) => (
-                <span
-                  className="sensor-node"
-                  key={`${point.x}-${point.y}-${index}`}
-                  style={
-                    {
-                      "--node-x": `${point.x}%`,
-                      "--node-y": `${point.y}%`,
-                      "--node-scale": point.scale,
-                    } as CSSProperties
-                  }
-                />
-              ))}
-            </div>
             <div className="command-chip">Keyboard Commands {commandsLabel}</div>
           </div>
         </div>
@@ -423,7 +414,7 @@ function MetricRow({ metric }: { metric: MetricState }) {
       <div className="metric-meta">
         <span className="micro-label">{metric.label}</span>
         <div className="metric-value">
-          {metric.value.toFixed(metric.decimals)}
+          {formatNumber(metric.value, metric.decimals)}
           <small>{metric.shortUnit ?? metric.unit}</small>
         </div>
       </div>
@@ -456,7 +447,7 @@ function SparklineChart({
   range: [number, number];
   status: StatusLevel;
 }) {
-  const { areaPath, linePath } = useMemo(
+  const { linePath } = useMemo(
     () => buildSparklineGeometry(points, range),
     [points, range]
   );
@@ -467,18 +458,15 @@ function SparklineChart({
       preserveAspectRatio="none"
       viewBox="0 0 100 100"
     >
-      <defs>
-        <linearGradient id={`area-${metricKey}`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.36" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="100" height="26" fill="rgba(175, 85, 63, 0.58)" />
-      <rect x="0" y="26" width="100" height="22" fill="rgba(115, 122, 67, 0.48)" />
-      <rect x="0" y="48" width="100" height="52" fill="rgba(49, 197, 211, 0.2)" />
-      <line x1="0" x2="100" y1="42" y2="42" className="sparkline-threshold" />
-      <path d={areaPath} fill={`url(#area-${metricKey})`} />
-      <path d={linePath} fill="none" stroke={color} strokeWidth="2.8" strokeLinecap="round" />
+      <path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeOpacity="0.96"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -522,7 +510,7 @@ function HoofForcePanel({
         <dl className="stride-details">
           <div>
             <dt>Hoof Symmetry Score</dt>
-            <dd>{symmetryScore.toFixed(1)}%</dd>
+            <dd>{ONE_DECIMAL_FORMATTER.format(symmetryScore)}%</dd>
           </div>
           <div>
             <dt>Stride Frequency</dt>
@@ -655,6 +643,7 @@ function HoofGlyph({
           <g filter={`url(#${idBase}-glow)`}>
             {blobs.map((blob) => (
               <ellipse
+                className="hoof-blob"
                 cx={blob.x}
                 cy={blob.y}
                 fill={`url(#${blob.id})`}
@@ -662,20 +651,20 @@ function HoofGlyph({
                 opacity={blob.opacity}
                 rx={blob.rx}
                 ry={blob.ry}
-                style={{ transition: "all 280ms ease-out" }}
               />
             ))}
             {renderedAccentShapes.map((shape) =>
               shape.kind === "path" ? (
                 <path
+                  className="hoof-accent"
                   d={shape.d}
                   fill={coreColor}
                   key={shape.id}
                   opacity={shape.opacity}
-                  style={{ transition: "opacity 260ms ease-out" }}
                 />
               ) : (
                 <ellipse
+                  className="hoof-accent"
                   cx={shape.cx}
                   cy={shape.cy}
                   fill={coreColor}
@@ -683,7 +672,6 @@ function HoofGlyph({
                   opacity={shape.opacity}
                   rx={shape.rx}
                   ry={shape.ry}
-                  style={{ transition: "opacity 260ms ease-out" }}
                 />
               )
             )}
@@ -734,7 +722,7 @@ function AlertPanel({
     .split(". ")
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, 3)
+    .slice(0, 4)
     .map((line) => (line.endsWith(".") ? line : `${line}.`));
 
   return (
@@ -765,7 +753,7 @@ function AlertPanel({
       <div className="alert-log inset-panel">
         <span className="micro-label">Alert Log (History)</span>
         <div className="alert-log__items">
-          {events.map((event) => (
+          {events.slice(0, 3).map((event) => (
             <AlertRow event={event} key={event.id} />
           ))}
         </div>
@@ -798,23 +786,18 @@ function AlertRow({ event }: { event: EventItem }) {
 
 function buildSparklineGeometry(points: number[], displayRange: [number, number]) {
   if (!points.length) {
-    return { linePath: "", areaPath: "" };
+    return { linePath: "" };
   }
 
-  const historyMin = Math.min(...points);
-  const historyMax = Math.max(...points);
   const displaySpan = displayRange[1] - displayRange[0] || 1;
-  const historySpan = historyMax - historyMin || 0;
-  const center = (historyMin + historyMax) / 2;
-  const desiredSpan = Math.max(historySpan * 1.22, displaySpan * 0.15);
-  const min = Math.min(historyMin, center - desiredSpan / 2) - Math.max(desiredSpan * 0.05, 0.015);
-  const max = Math.max(historyMax, center + desiredSpan / 2) + Math.max(desiredSpan * 0.05, 0.015);
+  const min = displayRange[0] - displaySpan * 0.1;
+  const max = displayRange[1] + displaySpan * 0.1;
   const span = max - min || 1;
 
   const coordinates = points.map((point, index) => {
     const x = (index / Math.max(points.length - 1, 1)) * 100;
-    const normalized = (point - min) / span;
-    const y = 88 - normalized * 70;
+    const normalized = Math.min(1, Math.max(0, (point - min) / span));
+    const y = 84 - normalized * 56;
     return {
       x,
       y,
@@ -825,36 +808,18 @@ function buildSparklineGeometry(points: number[], displayRange: [number, number]
     const single = coordinates[0];
     return {
       linePath: `M ${single.x.toFixed(2)} ${single.y.toFixed(2)}`,
-      areaPath: `M ${single.x.toFixed(2)} ${single.y.toFixed(2)} L ${single.x.toFixed(
-        2
-      )} 100 Z`,
     };
   }
 
   let linePath = `M ${coordinates[0].x.toFixed(2)} ${coordinates[0].y.toFixed(2)}`;
 
-  for (let index = 1; index < coordinates.length - 1; index += 1) {
+  for (let index = 1; index < coordinates.length; index += 1) {
     const current = coordinates[index];
-    const next = coordinates[index + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    linePath += ` Q ${current.x.toFixed(2)} ${current.y.toFixed(2)} ${midX.toFixed(
-      2
-    )} ${midY.toFixed(2)}`;
+    linePath += ` L ${current.x.toFixed(2)} ${current.y.toFixed(2)}`;
   }
-
-  const penultimate = coordinates.at(-2)!;
-  const last = coordinates.at(-1)!;
-  linePath += ` Q ${penultimate.x.toFixed(2)} ${penultimate.y.toFixed(2)} ${last.x.toFixed(
-    2
-  )} ${last.y.toFixed(2)}`;
-
-  const first = coordinates[0];
-  const areaPath = `${linePath} L ${last.x.toFixed(2)} 100 L ${first.x.toFixed(2)} 100 Z`;
 
   return {
     linePath,
-    areaPath,
   };
 }
 
