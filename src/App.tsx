@@ -583,6 +583,12 @@ function StridePhaseTimeline({
                     }}
                   />
                 ))}
+                {active ? (
+                  <span
+                    className="phase-lane__marker"
+                    style={{ left: `${stridePhase * 100}%` }}
+                  />
+                ) : null}
               </div>
             </div>
           );

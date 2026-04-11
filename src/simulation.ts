@@ -294,6 +294,8 @@ const STRIDE_DURATION_MS: Record<GaitMode, number> = {
   gallop: 450,
 };
 
+const STRIDE_PHASE_TIME_SCALE = 0.74;
+
 const STRIDE_PHASE_OFFSET: Record<GaitMode, number> = {
   walk: 0.18,
   gallop: 0.16,
@@ -760,7 +762,8 @@ export function useDashboardSimulation(): SimulationState {
   const stridePhase = useMemo(() => {
     const duration = lerp(STRIDE_DURATION_MS.walk, STRIDE_DURATION_MS.gallop, gaitBlend);
     const phaseOffset = lerp(STRIDE_PHASE_OFFSET.walk, STRIDE_PHASE_OFFSET.gallop, gaitBlend);
-    return (((phaseClockMs % duration) / duration) + phaseOffset) % 1;
+    const phaseElapsed = phaseClockMs * STRIDE_PHASE_TIME_SCALE;
+    return (((phaseElapsed % duration) / duration) + phaseOffset) % 1;
   }, [gaitBlend, phaseClockMs]);
 
   const hoofLoads = useMemo(() => getHoofLoads(stridePattern, stridePhase), [stridePattern, stridePhase]);
