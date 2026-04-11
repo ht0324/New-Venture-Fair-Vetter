@@ -44,6 +44,13 @@ export interface HoofLoads {
   RH: number;
 }
 
+export interface StrideWindow {
+  start: number;
+  end: number;
+}
+
+export type StridePattern = Record<keyof HoofLoads, StrideWindow>;
+
 export interface SimulationState {
   mode: GaitMode;
   scene: DemoScene;
@@ -54,6 +61,7 @@ export interface SimulationState {
   metrics: MetricState[];
   hoofLoads: HoofLoads;
   stridePhase: number;
+  stridePattern: StridePattern;
   strideFrequencyLabel: string;
   contactSummary: string;
   symmetryScore: number;
@@ -309,7 +317,7 @@ const EVENT_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   hour12: false,
 });
 
-const GAIT_PATTERNS: Record<GaitMode, Record<keyof HoofLoads, { start: number; end: number }>> = {
+const GAIT_PATTERNS: Record<GaitMode, StridePattern> = {
   walk: {
     LH: { start: 0.0, end: 0.62 },
     LF: { start: 0.25, end: 0.87 },
@@ -385,6 +393,27 @@ function sceneRanges(gaitBlend: number, scene: DemoScene): MetricRanges {
       interpolateRange(BASE_RANGES.walk.temperature, BASE_RANGES.gallop.temperature, gaitBlend),
       adjustment.temperature
     ),
+  };
+}
+
+function interpolateStridePattern(gaitBlend: number): StridePattern {
+  return {
+    LF: {
+      start: lerp(GAIT_PATTERNS.walk.LF.start, GAIT_PATTERNS.gallop.LF.start, gaitBlend),
+      end: lerp(GAIT_PATTERNS.walk.LF.end, GAIT_PATTERNS.gallop.LF.end, gaitBlend),
+    },
+    RF: {
+      start: lerp(GAIT_PATTERNS.walk.RF.start, GAIT_PATTERNS.gallop.RF.start, gaitBlend),
+      end: lerp(GAIT_PATTERNS.walk.RF.end, GAIT_PATTERNS.gallop.RF.end, gaitBlend),
+    },
+    LH: {
+      start: lerp(GAIT_PATTERNS.walk.LH.start, GAIT_PATTERNS.gallop.LH.start, gaitBlend),
+      end: lerp(GAIT_PATTERNS.walk.LH.end, GAIT_PATTERNS.gallop.LH.end, gaitBlend),
+    },
+    RH: {
+      start: lerp(GAIT_PATTERNS.walk.RH.start, GAIT_PATTERNS.gallop.RH.start, gaitBlend),
+      end: lerp(GAIT_PATTERNS.walk.RH.end, GAIT_PATTERNS.gallop.RH.end, gaitBlend),
+    },
   };
 }
 
@@ -513,9 +542,7 @@ function bellCurveContact(phase: number, start: number, end: number) {
   return Math.sin(progress * Math.PI);
 }
 
-function getHoofLoads(mode: GaitMode, phase: number): HoofLoads {
-  const pattern = GAIT_PATTERNS[mode];
-
+function getHoofLoads(pattern: StridePattern, phase: number): HoofLoads {
   return {
     LF: bellCurveContact(phase, pattern.LF.start, pattern.LF.end),
     RF: bellCurveContact(phase, pattern.RF.start, pattern.RF.end),
@@ -594,6 +621,7 @@ export function useDashboardSimulation(): SimulationState {
     },
   ]);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [phaseClockMs, setPhaseClockMs] = useState(0);
   const [timestampLabel, setTimestampLabel] = useState(formatTimestamp(new Date()));
   const [muted, setMuted] = useState(true);
 
@@ -656,6 +684,7 @@ export function useDashboardSimulation(): SimulationState {
     tickRef.current = 0;
     gaitBlendRef.current = 0;
     setElapsedMs(0);
+    setPhaseClockMs(0);
     setTimestampLabel(formatTimestamp(new Date()));
     setMetrics(createBaselineMetrics());
     setSceneState("healthy-walk");
@@ -665,6 +694,19 @@ export function useDashboardSimulation(): SimulationState {
 
   const toggleMute = useCallback(() => {
     setMuted((current) => !current);
+  }, []);
+
+  useEffect(() => {
+    let frameId = 0;
+
+    const tick = () => {
+      setPhaseClockMs(Date.now() - startedAtRef.current);
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => window.cancelAnimationFrame(frameId);
   }, []);
 
   useEffect(() => {
@@ -713,15 +755,15 @@ export function useDashboardSimulation(): SimulationState {
   }, [mode, scene]);
 
   const gaitBlend = gaitBlendRef.current;
+  const stridePattern = useMemo(() => interpolateStridePattern(gaitBlend), [gaitBlend]);
 
   const stridePhase = useMemo(() => {
     const duration = lerp(STRIDE_DURATION_MS.walk, STRIDE_DURATION_MS.gallop, gaitBlend);
     const phaseOffset = lerp(STRIDE_PHASE_OFFSET.walk, STRIDE_PHASE_OFFSET.gallop, gaitBlend);
-    const elapsed = Date.now() - startedAtRef.current;
-    return (((elapsed % duration) / duration) + phaseOffset) % 1;
-  }, [elapsedMs, gaitBlend]);
+    return (((phaseClockMs % duration) / duration) + phaseOffset) % 1;
+  }, [gaitBlend, phaseClockMs]);
 
-  const hoofLoads = useMemo(() => getHoofLoads(mode, stridePhase), [mode, stridePhase]);
+  const hoofLoads = useMemo(() => getHoofLoads(stridePattern, stridePhase), [stridePattern, stridePhase]);
 
   const symmetryScore = useMemo(() => {
     const base = SCENE_SYMMETRY[scene];
@@ -755,6 +797,7 @@ export function useDashboardSimulation(): SimulationState {
     metrics,
     hoofLoads,
     stridePhase,
+    stridePattern,
     strideFrequencyLabel,
     contactSummary,
     symmetryScore,

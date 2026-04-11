@@ -14,6 +14,8 @@ import {
   type HoofLoads,
   type MetricState,
   type StatusLevel,
+  type StridePattern,
+  type StrideWindow,
   useDashboardSimulation,
 } from "./simulation";
 
@@ -199,6 +201,7 @@ function App() {
             symmetryScore={simulation.symmetryScore}
             contactSummary={simulation.contactSummary}
             stridePhase={simulation.stridePhase}
+            stridePattern={simulation.stridePattern}
             mode={simulation.mode}
           />
 
@@ -477,6 +480,7 @@ function HoofForcePanel({
   mode,
   strideFrequencyLabel,
   stridePhase,
+  stridePattern,
   symmetryScore,
 }: {
   contactSummary: string;
@@ -484,6 +488,7 @@ function HoofForcePanel({
   mode: GaitMode;
   strideFrequencyLabel: string;
   stridePhase: number;
+  stridePattern: StridePattern;
   symmetryScore: number;
 }) {
   return (
@@ -522,25 +527,96 @@ function HoofForcePanel({
           </div>
         </dl>
 
-        <div className="phase-track">
-          <div className="phase-track__header">
-            <span>Stride Phase</span>
-            <span>{mode.toUpperCase()}</span>
-          </div>
-          <div className="phase-track__rail">
-            <div
-              className="phase-track__fill"
-              style={{ width: `${Math.max(12, stridePhase * 100)}%` }}
-            />
-          </div>
-          <div className="phase-track__labels">
-            {HOOF_ORDER.map((hoof) => (
-              <span key={hoof}>{hoof}</span>
-            ))}
-          </div>
-        </div>
+        <StridePhaseTimeline
+          mode={mode}
+          stridePhase={stridePhase}
+          stridePattern={stridePattern}
+        />
       </div>
     </section>
+  );
+}
+
+function StridePhaseTimeline({
+  mode,
+  stridePhase,
+  stridePattern,
+}: {
+  mode: GaitMode;
+  stridePhase: number;
+  stridePattern: StridePattern;
+}) {
+  return (
+    <div className="phase-timeline">
+      <div className="phase-timeline__header">
+        <span>Stride Phase</span>
+        <span>{mode.toUpperCase()} · {Math.round(stridePhase * 100)}%</span>
+      </div>
+
+      <div className="phase-timeline__body">
+        <div
+          className="phase-timeline__playhead"
+          style={{ left: `${stridePhase * 100}%` }}
+        />
+
+        {HOOF_ORDER.map((hoof) => {
+          const window = stridePattern[hoof];
+          const segments = expandStrideSegments(window);
+          const active = isStrideWindowActive(window, stridePhase);
+
+          return (
+            <div
+              className={`phase-lane${active ? " phase-lane--active" : ""}`}
+              key={hoof}
+            >
+              <span className="phase-lane__label">{hoof}</span>
+              <div className="phase-lane__rail">
+                {segments.map((segment, index) => (
+                  <span
+                    className={`phase-lane__window${
+                      active ? " phase-lane__window--active" : ""
+                    }`}
+                    key={`${hoof}-${index}-${segment.start}-${segment.end}`}
+                    style={{
+                      left: `${segment.start * 100}%`,
+                      width: `${Math.max(2, (segment.end - segment.start) * 100)}%`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function expandStrideSegments(window: StrideWindow) {
+  const normalizedStart = normalizePhase(window.start);
+  const duration = window.end - window.start;
+
+  if (duration <= 0) {
+    return [{ start: 0, end: 1 }];
+  }
+
+  const firstEnd = Math.min(1, normalizedStart + duration);
+  const segments = [{ start: normalizedStart, end: firstEnd }];
+
+  if (normalizedStart + duration > 1) {
+    segments.push({ start: 0, end: normalizedStart + duration - 1 });
+  }
+
+  return segments;
+}
+
+function normalizePhase(value: number) {
+  return ((value % 1) + 1) % 1;
+}
+
+function isStrideWindowActive(window: StrideWindow, stridePhase: number) {
+  return expandStrideSegments(window).some(
+    (segment) => stridePhase >= segment.start && stridePhase <= segment.end
   );
 }
 
