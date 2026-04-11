@@ -1,0 +1,861 @@
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  type CSSProperties,
+} from "react";
+import { interpolateRgbBasis } from "d3-interpolate";
+import { scaleSequential } from "d3-scale";
+import horseVideo from "../Horse_Treadmill_Animation_Generated_noaudio.mp4";
+import {
+  type DemoScene,
+  type EventItem,
+  type GaitMode,
+  type HoofLoads,
+  type MetricState,
+  type StatusLevel,
+  useDashboardSimulation,
+} from "./simulation";
+
+const STATUS_LABELS: Record<StatusLevel, string> = {
+  healthy: "HEALTHY",
+  watch: "WATCH",
+  alert: "ALERT",
+};
+
+const METRIC_STATUS_LABELS: Record<StatusLevel, string> = {
+  healthy: "STABLE",
+  watch: "WATCH",
+  alert: "ALERT",
+};
+
+const SCENE_SHORTCUTS: Record<string, DemoScene> = {
+  "1": "healthy-walk",
+  "2": "healthy-gallop",
+  "3": "mild-stress",
+  "4": "recovery",
+};
+
+const HOOF_ORDER: Array<keyof HoofLoads> = ["LF", "RF", "LH", "RH"];
+
+type PressureBlob = {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  weight: number;
+};
+
+type HoofAccentShape =
+  | { kind: "path"; d: string; weight: number }
+  | { kind: "ellipse"; cx: number; cy: number; rx: number; ry: number; weight: number };
+
+const SENSOR_POINTS = [
+  { x: 36, y: 35, scale: 0.92 },
+  { x: 46, y: 29, scale: 1.06 },
+  { x: 52, y: 33, scale: 0.9 },
+  { x: 58, y: 41, scale: 0.88 },
+  { x: 36, y: 66, scale: 0.86 },
+  { x: 57, y: 72, scale: 0.82 },
+];
+
+const pressureColorScale = scaleSequential(
+  interpolateRgbBasis(["#071221", "#0f3549", "#26c7da", "#dffcff"])
+).domain([0, 1]);
+
+const HOOF_OUTLINE_PATH =
+  "M60 8 C78 8 92 18 99 39 C106 63 102 109 85 135 C77 145 68 149 60 151 C52 149 43 145 35 135 C18 109 14 63 21 39 C28 18 42 8 60 8 Z";
+const HOOF_CLIP_PATH =
+  "M60 16 C75 16 87 26 93 44 C99 66 94 105 80 127 C73 136 66 140 60 142 C54 140 47 136 40 127 C26 105 21 66 27 44 C33 26 45 16 60 16 Z";
+const HOOF_FROG_PATH =
+  "M60 60 C69 74 72 92 69 118 C64 126 56 126 51 118 C48 92 51 74 60 60 Z";
+
+const HOOF_BLOB_LAYOUTS: Record<keyof HoofLoads, PressureBlob[]> = {
+  LF: [
+    { x: 59, y: 44, rx: 23, ry: 26, weight: 0.8 },
+    { x: 46, y: 72, rx: 13, ry: 17, weight: 0.78 },
+    { x: 67, y: 66, rx: 12, ry: 16, weight: 0.42 },
+    { x: 39, y: 38, rx: 7, ry: 11, weight: 0.34 },
+  ],
+  RF: [
+    { x: 60, y: 41, rx: 26, ry: 29, weight: 0.96 },
+    { x: 47, y: 68, rx: 14, ry: 19, weight: 0.7 },
+    { x: 75, y: 70, rx: 16, ry: 19, weight: 0.76 },
+    { x: 60, y: 88, rx: 16, ry: 18, weight: 0.34 },
+  ],
+  LH: [
+    { x: 60, y: 43, rx: 26, ry: 30, weight: 0.98 },
+    { x: 45, y: 73, rx: 14, ry: 18, weight: 0.68 },
+    { x: 72, y: 64, rx: 15, ry: 18, weight: 0.62 },
+    { x: 57, y: 88, rx: 16, ry: 18, weight: 0.32 },
+  ],
+  RH: [
+    { x: 44, y: 43, rx: 11, ry: 17, weight: 0.52 },
+    { x: 75, y: 40, rx: 10, ry: 13, weight: 0.38 },
+    { x: 42, y: 84, rx: 12, ry: 14, weight: 0.7 },
+    { x: 74, y: 81, rx: 10, ry: 13, weight: 0.64 },
+  ],
+};
+
+const HOOF_ACCENT_SHAPES: Record<keyof HoofLoads, HoofAccentShape[]> = {
+  LF: [
+    { kind: "path", d: "M35 38 C43 23 75 24 85 41 C82 60 72 79 60 93 C47 80 39 61 35 38 Z", weight: 0.48 },
+    { kind: "ellipse", cx: 46, cy: 88, rx: 11, ry: 14, weight: 0.68 },
+    { kind: "ellipse", cx: 39, cy: 40, rx: 5, ry: 10, weight: 0.34 },
+  ],
+  RF: [
+    { kind: "path", d: "M32 35 C41 20 79 21 89 39 C86 63 75 83 60 97 C46 82 35 61 32 35 Z", weight: 1.02 },
+    { kind: "path", d: "M40 50 C46 40 72 41 80 52 C77 69 69 82 60 89 C52 82 44 69 40 50 Z", weight: 0.78 },
+    { kind: "ellipse", cx: 48, cy: 73, rx: 11, ry: 13, weight: 0.66 },
+    { kind: "ellipse", cx: 73, cy: 69, rx: 12, ry: 15, weight: 0.64 },
+  ],
+  LH: [
+    { kind: "path", d: "M34 34 C43 18 80 19 88 38 C85 62 75 84 60 99 C45 84 36 61 34 34 Z", weight: 1.08 },
+    { kind: "ellipse", cx: 60, cy: 52, rx: 14, ry: 16, weight: 0.8 },
+    { kind: "path", d: "M42 53 C48 43 71 44 77 55 C73 69 65 82 59 88 C53 82 46 69 42 53 Z", weight: 0.74 },
+    { kind: "ellipse", cx: 45, cy: 77, rx: 10, ry: 13, weight: 0.58 },
+  ],
+  RH: [
+    { kind: "ellipse", cx: 44, cy: 45, rx: 11, ry: 17, weight: 0.6 },
+    { kind: "ellipse", cx: 76, cy: 40, rx: 9, ry: 13, weight: 0.42 },
+    { kind: "ellipse", cx: 43, cy: 84, rx: 12, ry: 14, weight: 0.74 },
+    { kind: "ellipse", cx: 75, cy: 81, rx: 10, ry: 13, weight: 0.68 },
+  ],
+};
+
+const HOOF_VISUAL_PROFILE: Record<
+  keyof HoofLoads,
+  { floor: number; intensityScale: number; accentScale: number }
+> = {
+  LF: { floor: 0.03, intensityScale: 0.58, accentScale: 0.62 },
+  RF: { floor: 0.08, intensityScale: 1.04, accentScale: 1.04 },
+  LH: { floor: 0.1, intensityScale: 1.1, accentScale: 1.16 },
+  RH: { floor: 0.02, intensityScale: 0.46, accentScale: 0.46 },
+};
+
+function App() {
+  const simulation = useDashboardSimulation();
+  const deferredMetrics = useDeferredValue(simulation.metrics);
+  const { reset, setMode, setScene, toggleMute } = simulation;
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const key = event.key.toLowerCase();
+
+      if (key === "w") {
+        startTransition(() => setMode("walk"));
+      } else if (key === "g") {
+        startTransition(() => setMode("gallop"));
+      } else if (key in SCENE_SHORTCUTS) {
+        startTransition(() => setScene(SCENE_SHORTCUTS[key]));
+      } else if (key === "r") {
+        startTransition(() => reset());
+      } else if (key === "m") {
+        toggleMute();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [reset, setMode, setScene, toggleMute]);
+
+  return (
+    <main className="app-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+      <section className="dashboard-frame">
+        <TopBar
+          mode={simulation.mode}
+          muted={simulation.muted}
+          profile={simulation.profile}
+          status={simulation.status}
+          timestampLabel={simulation.timestampLabel}
+          videoSrc={horseVideo}
+        />
+
+        <div className="panel-grid">
+          <HorsePanel
+            mode={simulation.mode}
+            status={simulation.status}
+            videoSrc={horseVideo}
+            commandsLabel={simulation.commandsLabel}
+          />
+
+          <VitalsPanel
+            metrics={deferredMetrics}
+            mode={simulation.mode}
+          />
+
+          <HoofForcePanel
+            hoofLoads={simulation.hoofLoads}
+            strideFrequencyLabel={simulation.strideFrequencyLabel}
+            symmetryScore={simulation.symmetryScore}
+            contactSummary={simulation.contactSummary}
+            stridePhase={simulation.stridePhase}
+            mode={simulation.mode}
+          />
+
+          <AlertPanel
+            events={simulation.events}
+            overallScore={simulation.overallScore}
+            status={simulation.status}
+            summaryText={simulation.summaryText}
+          />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function TopBar({
+  mode,
+  muted,
+  profile,
+  status,
+  timestampLabel,
+  videoSrc,
+}: {
+  mode: GaitMode;
+  muted: boolean;
+  profile: {
+    name: string;
+    breed: string;
+    age: string;
+  };
+  status: StatusLevel;
+  timestampLabel: string;
+  videoSrc: string;
+}) {
+  return (
+    <header className="topbar panel">
+      <div className="topbar-copy">
+        <p className="eyebrow">Vetter Prototype Dashboard</p>
+        <div className="topbar-title-row">
+          <h1>Equine Health Monitor</h1>
+          <StatusPill status={status} />
+        </div>
+      </div>
+
+      <div className="topbar-center">
+        <CircularVideo videoSrc={videoSrc} />
+        <CircularVideo videoSrc={videoSrc} delayed />
+      </div>
+
+      <div className="topbar-profile panel inset-panel">
+        <div>
+          <p className="micro-label">Horse</p>
+          <p className="profile-line">
+            {profile.name} / {profile.breed} / {profile.age}
+          </p>
+        </div>
+      </div>
+
+      <div className="topbar-meta">
+        <p>{timestampLabel}</p>
+        <div className="wordmark">
+          <span className="wordmark-mark" />
+          <div>
+            <p>Vetter</p>
+            <p className="muted-line">{mode.toUpperCase()} DEMO {muted ? "MUTED" : "LIVE"}</p>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function CircularVideo({
+  delayed = false,
+  videoSrc,
+}: {
+  delayed?: boolean;
+  videoSrc: string;
+}) {
+  return (
+    <div className={`circle-video ${delayed ? "circle-video--delayed" : ""}`}>
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        src={videoSrc}
+      />
+      <div className="circle-video-glow" />
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: StatusLevel }) {
+  return (
+    <div className={`status-pill status-pill--${status}`}>
+      <span className="status-dot" />
+      {STATUS_LABELS[status]}
+    </div>
+  );
+}
+
+function HorsePanel({
+  commandsLabel,
+  mode,
+  status,
+  videoSrc,
+}: {
+  commandsLabel: string;
+  mode: GaitMode;
+  status: StatusLevel;
+  videoSrc: string;
+}) {
+  return (
+    <section className="panel horse-panel">
+      <div className="panel-heading">
+        <h2>3D Horse Simulation</h2>
+        <span className="panel-hint panel-hint--icon">?</span>
+      </div>
+
+      <div className="horse-panel-content">
+        <div className="horse-sidebar">
+          <StatCard
+            label="Sensor Nodes Active"
+            value="6"
+            accent="cyan"
+          />
+          <StatCard
+            label="Current Gait"
+            value={mode === "walk" ? "Walk" : "Gallop"}
+            accent={status === "healthy" ? "green" : "amber"}
+            suffix={<span className="key-hint">(Key: {mode === "walk" ? "W" : "G"})</span>}
+          />
+        </div>
+
+        <div className="horse-video-frame">
+          <div className="horse-video-shell">
+            <video
+              autoPlay
+              className="horse-video"
+              loop
+              muted
+              playsInline
+              src={videoSrc}
+            />
+            <div className="horse-grid-overlay" />
+            <div className="horse-vignette" />
+            <div className="sensor-overlay">
+              {SENSOR_POINTS.map((point, index) => (
+                <span
+                  className="sensor-node"
+                  key={`${point.x}-${point.y}-${index}`}
+                  style={
+                    {
+                      "--node-x": `${point.x}%`,
+                      "--node-y": `${point.y}%`,
+                      "--node-scale": point.scale,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+            <div className="command-chip">Keyboard Commands {commandsLabel}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StatCard({
+  accent,
+  label,
+  suffix,
+  value,
+}: {
+  accent: "cyan" | "green" | "amber" | "blue";
+  label: string;
+  suffix?: React.ReactNode;
+  value: string;
+}) {
+  return (
+    <div className="stat-card inset-panel">
+      <span className="micro-label">{label}</span>
+      <div className={`stat-card-value stat-card-value--${accent}`}>
+        <span>{value}</span>
+        {suffix}
+      </div>
+    </div>
+  );
+}
+
+function VitalsPanel({
+  metrics,
+  mode,
+}: {
+  metrics: MetricState[];
+  mode: GaitMode;
+}) {
+  return (
+    <section className="panel vitals-panel">
+      <div className="panel-heading panel-heading--spread">
+        <h2>Physiological Console</h2>
+        <span className="panel-hint">Presentation Mode Active</span>
+      </div>
+
+      <div className="metric-list">
+        {metrics.map((metric) => (
+          <MetricRow
+            key={metric.key}
+            metric={metric}
+          />
+        ))}
+      </div>
+
+      <div className="vitals-footer">
+        <span>Mode: {mode.toUpperCase()}</span>
+        <span>Continuous telemetry</span>
+      </div>
+    </section>
+  );
+}
+
+function MetricRow({ metric }: { metric: MetricState }) {
+  return (
+    <div className="metric-row">
+      <div className="metric-meta">
+        <span className="micro-label">{metric.label}</span>
+        <div className="metric-value">
+          {metric.value.toFixed(metric.decimals)}
+          <small>{metric.shortUnit ?? metric.unit}</small>
+        </div>
+      </div>
+
+      <SparklineChart
+        color={metric.color}
+        metricKey={metric.key}
+        points={metric.history}
+        range={metric.displayRange}
+        status={metric.status}
+      />
+
+      <div className={`mini-status mini-status--${metric.status}`}>
+        {METRIC_STATUS_LABELS[metric.status]}
+      </div>
+    </div>
+  );
+}
+
+function SparklineChart({
+  color,
+  metricKey,
+  points,
+  range,
+  status,
+}: {
+  color: string;
+  metricKey: MetricState["key"];
+  points: number[];
+  range: [number, number];
+  status: StatusLevel;
+}) {
+  const { areaPath, linePath } = useMemo(
+    () => buildSparklineGeometry(points, range),
+    [points, range]
+  );
+
+  return (
+    <svg
+      className={`sparkline sparkline--${status}`}
+      preserveAspectRatio="none"
+      viewBox="0 0 100 100"
+    >
+      <defs>
+        <linearGradient id={`area-${metricKey}`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.36" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="100" height="26" fill="rgba(175, 85, 63, 0.58)" />
+      <rect x="0" y="26" width="100" height="22" fill="rgba(115, 122, 67, 0.48)" />
+      <rect x="0" y="48" width="100" height="52" fill="rgba(49, 197, 211, 0.2)" />
+      <line x1="0" x2="100" y1="42" y2="42" className="sparkline-threshold" />
+      <path d={areaPath} fill={`url(#area-${metricKey})`} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth="2.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function HoofForcePanel({
+  contactSummary,
+  hoofLoads,
+  mode,
+  strideFrequencyLabel,
+  stridePhase,
+  symmetryScore,
+}: {
+  contactSummary: string;
+  hoofLoads: HoofLoads;
+  mode: GaitMode;
+  strideFrequencyLabel: string;
+  stridePhase: number;
+  symmetryScore: number;
+}) {
+  return (
+    <section className="panel hoof-panel">
+      <div className="hoof-visuals">
+        <div className="panel-heading">
+          <h2>Hoof Force Map</h2>
+        </div>
+
+        <div className="hoof-map">
+          {HOOF_ORDER.map((hoof) => (
+            <div className="hoof-node" key={hoof}>
+              <HoofGlyph intensity={hoofLoads[hoof]} label={hoof} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="stride-summary">
+        <div className="panel-heading">
+          <h2>Stride Analytics Summary</h2>
+        </div>
+
+        <dl className="stride-details">
+          <div>
+            <dt>Hoof Symmetry Score</dt>
+            <dd>{symmetryScore.toFixed(1)}%</dd>
+          </div>
+          <div>
+            <dt>Stride Frequency</dt>
+            <dd>{strideFrequencyLabel}</dd>
+          </div>
+          <div>
+            <dt>Ground Contact Time</dt>
+            <dd>{contactSummary}</dd>
+          </div>
+        </dl>
+
+        <div className="phase-track">
+          <div className="phase-track__header">
+            <span>Stride Phase</span>
+            <span>{mode.toUpperCase()}</span>
+          </div>
+          <div className="phase-track__rail">
+            <div
+              className="phase-track__fill"
+              style={{ width: `${Math.max(12, stridePhase * 100)}%` }}
+            />
+          </div>
+          <div className="phase-track__labels">
+            {HOOF_ORDER.map((hoof) => (
+              <span key={hoof}>{hoof}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HoofGlyph({
+  intensity,
+  label,
+}: {
+  intensity: number;
+  label: keyof HoofLoads;
+}) {
+  const blobLayouts = HOOF_BLOB_LAYOUTS[label];
+  const accentShapes = HOOF_ACCENT_SHAPES[label];
+  const visualProfile = HOOF_VISUAL_PROFILE[label];
+  const idBase = `hoof-${label.toLowerCase()}`;
+  const visibleIntensity =
+    visualProfile.floor + intensity * (1 - visualProfile.floor) * visualProfile.intensityScale;
+  const coreColor = pressureColorScale(Math.min(1, visibleIntensity + 0.14));
+  const midColor = pressureColorScale(Math.max(0.12, visibleIntensity * 0.82));
+  const auraColor = pressureColorScale(Math.max(0.12, visibleIntensity * 0.58));
+  const outerGlowOpacity = 0.04 + visibleIntensity * 0.14 * visualProfile.accentScale;
+  const blobs = blobLayouts.map((blob, index) => {
+    const blobValue = Math.min(1, 0.18 + visibleIntensity * blob.weight);
+    return {
+      ...blob,
+      id: `${idBase}-grad-${index}`,
+      value: blobValue,
+      rx: blob.rx + visibleIntensity * 7,
+      ry: blob.ry + visibleIntensity * 8,
+      opacity: 0.28 + blobValue * 0.76,
+    };
+  });
+  const renderedAccentShapes = accentShapes.map((shape, index) => ({
+    ...shape,
+    id: `${idBase}-accent-${index}`,
+    opacity: 0.12 + visibleIntensity * shape.weight * 0.74 * visualProfile.accentScale,
+  }));
+
+  return (
+    <div className="hoof-glyph-wrap">
+      <svg className="hoof-glyph" viewBox="0 0 120 152">
+        <defs>
+          <clipPath id={`${idBase}-clip`}>
+            <path d={HOOF_CLIP_PATH} />
+          </clipPath>
+          <filter id={`${idBase}-glow`} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation={6 + intensity * 4} result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id={`${idBase}-outer`} x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation={12 + intensity * 5} />
+          </filter>
+          {blobs.map((blob) => (
+            <radialGradient id={blob.id} cx="50%" cy="50%" key={blob.id} r="65%">
+              <stop
+                offset="0%"
+                stopColor={pressureColorScale(Math.min(1, blob.value + 0.18))}
+                stopOpacity={0.96}
+              />
+              <stop
+                offset="58%"
+                stopColor={pressureColorScale(Math.max(0.1, blob.value * 0.84))}
+                stopOpacity={Math.min(0.9, blob.opacity)}
+              />
+              <stop
+                offset="100%"
+                stopColor={pressureColorScale(Math.max(0.08, blob.value * 0.42))}
+                stopOpacity="0"
+              />
+            </radialGradient>
+          ))}
+        </defs>
+        <ellipse
+          cx="60"
+          cy="64"
+          fill={auraColor}
+          filter={`url(#${idBase}-outer)`}
+          opacity={outerGlowOpacity}
+          rx={28 + visibleIntensity * 10}
+          ry={44 + visibleIntensity * 14}
+        />
+        <path
+          d={HOOF_OUTLINE_PATH}
+          fill="rgba(7, 16, 30, 0.88)"
+          stroke="rgba(192, 230, 255, 0.56)"
+          strokeWidth="2"
+        />
+        <path d={HOOF_CLIP_PATH} fill="rgba(13, 28, 44, 0.82)" />
+        <g clipPath={`url(#${idBase}-clip)`}>
+          <ellipse
+            cx="60"
+            cy="49"
+            fill={midColor}
+            opacity={0.05 + visibleIntensity * 0.08}
+            rx="24"
+            ry="34"
+          />
+          <g filter={`url(#${idBase}-glow)`}>
+            {blobs.map((blob) => (
+              <ellipse
+                cx={blob.x}
+                cy={blob.y}
+                fill={`url(#${blob.id})`}
+                key={blob.id}
+                opacity={blob.opacity}
+                rx={blob.rx}
+                ry={blob.ry}
+                style={{ transition: "all 280ms ease-out" }}
+              />
+            ))}
+            {renderedAccentShapes.map((shape) =>
+              shape.kind === "path" ? (
+                <path
+                  d={shape.d}
+                  fill={coreColor}
+                  key={shape.id}
+                  opacity={shape.opacity}
+                  style={{ transition: "opacity 260ms ease-out" }}
+                />
+              ) : (
+                <ellipse
+                  cx={shape.cx}
+                  cy={shape.cy}
+                  fill={coreColor}
+                  key={shape.id}
+                  opacity={shape.opacity}
+                  rx={shape.rx}
+                  ry={shape.ry}
+                  style={{ transition: "opacity 260ms ease-out" }}
+                />
+              )
+            )}
+          </g>
+        </g>
+        <path d={HOOF_CLIP_PATH} fill="none" stroke="rgba(115, 190, 215, 0.32)" strokeWidth="1.35" />
+        <path d={HOOF_FROG_PATH} fill="rgba(5, 12, 22, 0.76)" stroke="rgba(118, 165, 182, 0.22)" strokeWidth="1.2" />
+        <path
+          d="M45 82 C45 100 42 118 36 130"
+          fill="none"
+          stroke="rgba(6, 13, 24, 0.92)"
+          strokeLinecap="round"
+          strokeWidth="9"
+        />
+        <path
+          d="M75 82 C75 100 78 118 84 130"
+          fill="none"
+          stroke="rgba(6, 13, 24, 0.92)"
+          strokeLinecap="round"
+          strokeWidth="9"
+        />
+        <path
+          d="M60 18 C76 18 87 30 90 48"
+          fill="none"
+          opacity={0.4 + visibleIntensity * 0.18}
+          stroke={coreColor}
+          strokeLinecap="round"
+          strokeWidth="1.6"
+        />
+      </svg>
+      <span className="hoof-label">{label}</span>
+    </div>
+  );
+}
+
+function AlertPanel({
+  events,
+  overallScore,
+  status,
+  summaryText,
+}: {
+  events: EventItem[];
+  overallScore: number;
+  status: StatusLevel;
+  summaryText: string;
+}) {
+  const summaryLines = summaryText
+    .split(". ")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((line) => (line.endsWith(".") ? line : `${line}.`));
+
+  return (
+    <section className="panel alert-panel">
+      <div className="panel-heading">
+        <h2>Alert Log &amp; Status</h2>
+      </div>
+
+      <div className="alert-top">
+        <div className={`score-card score-card--${status}`}>
+          <span className="micro-label">Overall Physiological Score:</span>
+          <div className="score-card__value">
+            <strong>{overallScore}</strong>
+            <span>/ 100</span>
+          </div>
+        </div>
+
+        <div className="summary-card inset-panel">
+          <span className="micro-label">AI Narration Summary</span>
+          <div className="summary-card__copy">
+            {summaryLines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="alert-log inset-panel">
+        <span className="micro-label">Alert Log (History)</span>
+        <div className="alert-log__items">
+          {events.map((event) => (
+            <AlertRow event={event} key={event.id} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AlertRow({ event }: { event: EventItem }) {
+  return (
+    <div className="alert-row">
+      <span className="alert-time">{event.timeLabel}</span>
+      <span className="alert-divider">-</span>
+      <span className={`severity severity--${event.kind}`}>
+        {event.kind.toUpperCase()}
+      </span>
+      <span className="alert-divider">-</span>
+      <span className="alert-label">{event.label}</span>
+      {event.severityLabel ? (
+        <>
+          <span className="alert-divider">-</span>
+          <span className="alert-tail">
+            SEVERITY: <strong>{event.severityLabel}</strong>
+          </span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function buildSparklineGeometry(points: number[], displayRange: [number, number]) {
+  if (!points.length) {
+    return { linePath: "", areaPath: "" };
+  }
+
+  const historyMin = Math.min(...points);
+  const historyMax = Math.max(...points);
+  const displaySpan = displayRange[1] - displayRange[0] || 1;
+  const historySpan = historyMax - historyMin || 0;
+  const center = (historyMin + historyMax) / 2;
+  const desiredSpan = Math.max(historySpan * 1.22, displaySpan * 0.15);
+  const min = Math.min(historyMin, center - desiredSpan / 2) - Math.max(desiredSpan * 0.05, 0.015);
+  const max = Math.max(historyMax, center + desiredSpan / 2) + Math.max(desiredSpan * 0.05, 0.015);
+  const span = max - min || 1;
+
+  const coordinates = points.map((point, index) => {
+    const x = (index / Math.max(points.length - 1, 1)) * 100;
+    const normalized = (point - min) / span;
+    const y = 88 - normalized * 70;
+    return {
+      x,
+      y,
+    };
+  });
+
+  if (coordinates.length === 1) {
+    const single = coordinates[0];
+    return {
+      linePath: `M ${single.x.toFixed(2)} ${single.y.toFixed(2)}`,
+      areaPath: `M ${single.x.toFixed(2)} ${single.y.toFixed(2)} L ${single.x.toFixed(
+        2
+      )} 100 Z`,
+    };
+  }
+
+  let linePath = `M ${coordinates[0].x.toFixed(2)} ${coordinates[0].y.toFixed(2)}`;
+
+  for (let index = 1; index < coordinates.length - 1; index += 1) {
+    const current = coordinates[index];
+    const next = coordinates[index + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    linePath += ` Q ${current.x.toFixed(2)} ${current.y.toFixed(2)} ${midX.toFixed(
+      2
+    )} ${midY.toFixed(2)}`;
+  }
+
+  const penultimate = coordinates.at(-2)!;
+  const last = coordinates.at(-1)!;
+  linePath += ` Q ${penultimate.x.toFixed(2)} ${penultimate.y.toFixed(2)} ${last.x.toFixed(
+    2
+  )} ${last.y.toFixed(2)}`;
+
+  const first = coordinates[0];
+  const areaPath = `${linePath} L ${last.x.toFixed(2)} 100 L ${first.x.toFixed(2)} 100 Z`;
+
+  return {
+    linePath,
+    areaPath,
+  };
+}
+
+export default App;
