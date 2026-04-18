@@ -554,10 +554,12 @@ function StridePhaseTimeline({
       </div>
 
       <div className="phase-timeline__body">
-        <div
-          className="phase-timeline__playhead"
-          style={{ left: `${stridePhase * 100}%` }}
-        />
+        <div className="phase-timeline__playhead-column" aria-hidden="true">
+          <div
+            className="phase-timeline__playhead"
+            style={{ left: `${stridePhase * 100}%` }}
+          />
+        </div>
 
         {HOOF_ORDER.map((hoof) => {
           const window = stridePattern[hoof];

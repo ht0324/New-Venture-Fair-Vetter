@@ -294,7 +294,7 @@ const STRIDE_DURATION_MS: Record<GaitMode, number> = {
   gallop: 450,
 };
 
-const STRIDE_PHASE_TIME_SCALE = 0.74;
+const STRIDE_PHASE_TIME_SCALE = 0.38;
 
 const STRIDE_PHASE_OFFSET: Record<GaitMode, number> = {
   walk: 0.18,
