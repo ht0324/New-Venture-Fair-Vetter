@@ -385,6 +385,25 @@ function formatSession(elapsedMs: number) {
   return `${minutes}:${seconds}`;
 }
 
+function createEventItem(
+  kind: EventKind,
+  label: string,
+  severityLabel?: string,
+  occurredAt: Date = new Date()
+): EventItem {
+  return {
+    id: `${kind}-${occurredAt.getTime()}-${label}`,
+    timeLabel: EVENT_TIME_FORMATTER.format(occurredAt),
+    kind,
+    label,
+    severityLabel,
+  };
+}
+
+function createInitialEvents(startedAt: Date = new Date()) {
+  return [createEventItem("note", "Baseline established.", undefined, startedAt)];
+}
+
 function addRange(base: MetricRange, adjustment?: MetricRange): MetricRange {
   if (!adjustment) {
     return base;
@@ -643,52 +662,23 @@ function metricStatus(
 }
 
 export function useDashboardSimulation(): SimulationState {
+  const bootedAtRef = useRef(new Date());
+  const startedAtRef = useRef(bootedAtRef.current.getTime());
   const [mode, setModeState] = useState<GaitMode>("walk");
   const [physiologyProfile, setPhysiologyProfileState] =
     useState<PhysiologyProfile>("healthy-walk");
   const [metrics, setMetrics] = useState<MetricState[]>(createBaselineMetrics);
-  const [events, setEvents] = useState<EventItem[]>([
-    {
-      id: "baseline",
-      timeLabel: "10:01:30",
-      kind: "note",
-      label: "Baseline established.",
-    },
-    {
-      id: "shift",
-      timeLabel: "10:15:00",
-      kind: "event",
-      label: "Gait Shift: WALK",
-    },
-    {
-      id: "resp",
-      timeLabel: "10:32:15",
-      kind: "alert",
-      label: "Mild Resp Tachycardia (Resolved)",
-      severityLabel: "YELLOW",
-    },
-  ]);
+  const [events, setEvents] = useState<EventItem[]>(() => createInitialEvents(bootedAtRef.current));
   const [elapsedMs, setElapsedMs] = useState(0);
   const [phaseClockMs, setPhaseClockMs] = useState(0);
-  const [timestampLabel, setTimestampLabel] = useState(formatTimestamp(new Date()));
+  const [timestampLabel, setTimestampLabel] = useState(() => formatTimestamp(bootedAtRef.current));
   const [muted, setMuted] = useState(true);
-
-  const startedAtRef = useRef(Date.now());
   const tickRef = useRef(0);
   const gaitBlendRef = useRef(0);
 
   const appendEvent = useCallback((kind: EventKind, label: string, severityLabel?: string) => {
     setEvents((current) =>
-      [
-        {
-          id: `${kind}-${Date.now()}-${label}`,
-          timeLabel: EVENT_TIME_FORMATTER.format(new Date()),
-          kind,
-          label,
-          severityLabel,
-        },
-        ...current,
-      ].slice(0, 6)
+      [createEventItem(kind, label, severityLabel), ...current].slice(0, 6)
     );
   }, []);
 
@@ -729,17 +719,18 @@ export function useDashboardSimulation(): SimulationState {
   );
 
   const reset = useCallback(() => {
-    startedAtRef.current = Date.now();
+    const restartedAt = new Date();
+    startedAtRef.current = restartedAt.getTime();
     tickRef.current = 0;
     gaitBlendRef.current = 0;
     setElapsedMs(0);
     setPhaseClockMs(0);
-    setTimestampLabel(formatTimestamp(new Date()));
+    setTimestampLabel(formatTimestamp(restartedAt));
     setMetrics(createBaselineMetrics());
     setPhysiologyProfileState("healthy-walk");
     setModeState("walk");
-    appendEvent("note", "Baseline re-established.");
-  }, [appendEvent]);
+    setEvents(createInitialEvents(restartedAt));
+  }, []);
 
   const toggleMute = useCallback(() => {
     setMuted((current) => !current);
