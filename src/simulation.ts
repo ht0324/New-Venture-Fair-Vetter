@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type GaitMode = "walk" | "gallop";
-export type DemoScene =
+export type PhysiologyProfile =
   | "healthy-walk"
   | "healthy-gallop"
   | "mild-stress"
@@ -44,6 +44,13 @@ export interface HoofLoads {
   RH: number;
 }
 
+export interface HoofPressures {
+  LF: number;
+  RF: number;
+  LH: number;
+  RH: number;
+}
+
 export interface StrideWindow {
   start: number;
   end: number;
@@ -53,13 +60,14 @@ export type StridePattern = Record<keyof HoofLoads, StrideWindow>;
 
 export interface SimulationState {
   mode: GaitMode;
-  scene: DemoScene;
+  physiologyProfile: PhysiologyProfile;
   status: StatusLevel;
   overallScore: number;
   sessionLabel: string;
   timestampLabel: string;
   metrics: MetricState[];
   hoofLoads: HoofLoads;
+  hoofPressures: HoofPressures;
   stridePhase: number;
   stridePattern: StridePattern;
   strideFrequencyLabel: string;
@@ -72,10 +80,9 @@ export interface SimulationState {
     breed: string;
     age: string;
   };
-  commandsLabel: string;
   muted: boolean;
   setMode: (mode: GaitMode) => void;
-  setScene: (scene: DemoScene) => void;
+  setPhysiologyProfile: (profile: PhysiologyProfile) => void;
   reset: () => void;
   toggleMute: () => void;
 }
@@ -164,7 +171,7 @@ const GRAPH_MIN_SPAN: Record<MetricKey, number> = {
   temperature: 0.18,
 };
 
-const SCENE_RANGE_ADJUSTMENTS: Record<DemoScene, Partial<MetricRanges>> = {
+const PROFILE_RANGE_ADJUSTMENTS: Record<PhysiologyProfile, Partial<MetricRanges>> = {
   "healthy-walk": {},
   "healthy-gallop": {},
   "mild-stress": {
@@ -183,7 +190,7 @@ const SCENE_RANGE_ADJUSTMENTS: Record<DemoScene, Partial<MetricRanges>> = {
   },
 };
 
-const NOISE_AMPLITUDE: Record<DemoScene, Record<GaitMode, Record<MetricKey, number>>> = {
+const NOISE_AMPLITUDE: Record<PhysiologyProfile, Record<GaitMode, Record<MetricKey, number>>> = {
   "healthy-walk": {
     walk: {
       heartRate: 0.34,
@@ -250,28 +257,28 @@ const NOISE_AMPLITUDE: Record<DemoScene, Record<GaitMode, Record<MetricKey, numb
   },
 };
 
-const SCENE_TO_MODE: Record<DemoScene, GaitMode> = {
+const PROFILE_TO_MODE: Record<PhysiologyProfile, GaitMode> = {
   "healthy-walk": "walk",
   "healthy-gallop": "gallop",
   "mild-stress": "gallop",
   recovery: "walk",
 };
 
-const SCENE_STATUS: Record<DemoScene, StatusLevel> = {
+const PROFILE_STATUS: Record<PhysiologyProfile, StatusLevel> = {
   "healthy-walk": "healthy",
   "healthy-gallop": "healthy",
   "mild-stress": "watch",
   recovery: "healthy",
 };
 
-const SCENE_SCORE: Record<DemoScene, number> = {
+const PROFILE_SCORE: Record<PhysiologyProfile, number> = {
   "healthy-walk": 98,
   "healthy-gallop": 96,
   "mild-stress": 86,
   recovery: 92,
 };
 
-const SCENE_SUMMARY = {
+const PROFILE_SUMMARY = {
   "healthy-walk":
     "Thunderbolt is exhibiting optimal physiological markers. All vital systems are stable within healthy ranges. Stride symmetry and ground contact are excellent.",
   "healthy-gallop":
@@ -280,9 +287,9 @@ const SCENE_SUMMARY = {
     "A mild stress signature is developing. Heart rate and lactate are drifting beyond the preferred envelope, while hoof symmetry remains mostly controlled.",
   recovery:
     "Recovery is progressing well. Core metrics are trending back toward baseline and stride balance is settling into a healthier pattern.",
-} satisfies Record<DemoScene, string>;
+} satisfies Record<PhysiologyProfile, string>;
 
-const SCENE_SYMMETRY: Record<DemoScene, number> = {
+const PROFILE_SYMMETRY: Record<PhysiologyProfile, number> = {
   "healthy-walk": 99.1,
   "healthy-gallop": 97.8,
   "mild-stress": 92.3,
@@ -334,6 +341,21 @@ const GAIT_PATTERNS: Record<GaitMode, StridePattern> = {
   },
 };
 
+const HOOF_PRESSURE_PEAK_KPA: Record<GaitMode, HoofPressures> = {
+  walk: {
+    LF: 190,
+    RF: 200,
+    LH: 180,
+    RH: 185,
+  },
+  gallop: {
+    LF: 340,
+    RF: 360,
+    LH: 320,
+    RH: 335,
+  },
+};
+
 function midpoint([min, max]: MetricRange) {
   return (min + max) / 2;
 }
@@ -371,8 +393,8 @@ function addRange(base: MetricRange, adjustment?: MetricRange): MetricRange {
   return [base[0] + adjustment[0], base[1] + adjustment[1]];
 }
 
-function sceneRanges(gaitBlend: number, scene: DemoScene): MetricRanges {
-  const adjustment = SCENE_RANGE_ADJUSTMENTS[scene];
+function profileRanges(gaitBlend: number, physiologyProfile: PhysiologyProfile): MetricRanges {
+  const adjustment = PROFILE_RANGE_ADJUSTMENTS[physiologyProfile];
 
   return {
     heartRate: addRange(
@@ -448,12 +470,12 @@ function sinusoidalNoise(
   tick: number,
   metricKey: MetricKey,
   gaitBlend: number,
-  scene: DemoScene
+  physiologyProfile: PhysiologyProfile
 ) {
   const scaledTick = tick * VITAL_TIME_SCALE;
   const amplitude = lerp(
-    NOISE_AMPLITUDE[scene].walk[metricKey],
-    NOISE_AMPLITUDE[scene].gallop[metricKey],
+    NOISE_AMPLITUDE[physiologyProfile].walk[metricKey],
+    NOISE_AMPLITUDE[physiologyProfile].gallop[metricKey],
     gaitBlend
   );
   const metricIndex = METRIC_META.findIndex((metric) => metric.key === metricKey) + 1;
@@ -488,7 +510,10 @@ function sinusoidalNoise(
       break;
   }
 
-  if (scene === "mild-stress" && ["heartRate", "lactate", "temperature"].includes(metricKey)) {
+  if (
+    physiologyProfile === "mild-stress" &&
+    ["heartRate", "lactate", "temperature"].includes(metricKey)
+  ) {
     return base + Math.sin(scaledTick * 0.5 + metricIndex) * amplitude * 0.3;
   }
 
@@ -553,21 +578,41 @@ function getHoofLoads(pattern: StridePattern, phase: number): HoofLoads {
   };
 }
 
+function getHoofPressures(hoofLoads: HoofLoads, gaitBlend: number): HoofPressures {
+  return {
+    LF: Math.round(
+      hoofLoads.LF * lerp(HOOF_PRESSURE_PEAK_KPA.walk.LF, HOOF_PRESSURE_PEAK_KPA.gallop.LF, gaitBlend)
+    ),
+    RF: Math.round(
+      hoofLoads.RF * lerp(HOOF_PRESSURE_PEAK_KPA.walk.RF, HOOF_PRESSURE_PEAK_KPA.gallop.RF, gaitBlend)
+    ),
+    LH: Math.round(
+      hoofLoads.LH * lerp(HOOF_PRESSURE_PEAK_KPA.walk.LH, HOOF_PRESSURE_PEAK_KPA.gallop.LH, gaitBlend)
+    ),
+    RH: Math.round(
+      hoofLoads.RH * lerp(HOOF_PRESSURE_PEAK_KPA.walk.RH, HOOF_PRESSURE_PEAK_KPA.gallop.RH, gaitBlend)
+    ),
+  };
+}
+
 function metricStatus(
   key: MetricKey,
   value: number,
   ranges: MetricRanges,
-  scene: DemoScene,
+  physiologyProfile: PhysiologyProfile,
   gaitBlend: number
 ): StatusLevel {
   const [min, max] = ranges[key];
 
-  if (scene === "mild-stress" && ["heartRate", "lactate", "temperature"].includes(key)) {
+  if (
+    physiologyProfile === "mild-stress" &&
+    ["heartRate", "lactate", "temperature"].includes(key)
+  ) {
     return "watch";
   }
 
   if (
-    (scene === "healthy-walk" || scene === "healthy-gallop") &&
+    (physiologyProfile === "healthy-walk" || physiologyProfile === "healthy-gallop") &&
     gaitBlend > 0.02 &&
     gaitBlend < 0.98
   ) {
@@ -599,7 +644,8 @@ function metricStatus(
 
 export function useDashboardSimulation(): SimulationState {
   const [mode, setModeState] = useState<GaitMode>("walk");
-  const [scene, setSceneState] = useState<DemoScene>("healthy-walk");
+  const [physiologyProfile, setPhysiologyProfileState] =
+    useState<PhysiologyProfile>("healthy-walk");
   const [metrics, setMetrics] = useState<MetricState[]>(createBaselineMetrics);
   const [events, setEvents] = useState<EventItem[]>([
     {
@@ -612,7 +658,7 @@ export function useDashboardSimulation(): SimulationState {
       id: "shift",
       timeLabel: "10:15:00",
       kind: "event",
-      label: "Gait Shift: WALK (Keyboard: W)",
+      label: "Gait Shift: WALK",
     },
     {
       id: "resp",
@@ -651,11 +697,9 @@ export function useDashboardSimulation(): SimulationState {
       setModeState(nextMode);
       appendEvent(
         "event",
-        `Gait Shift: ${nextMode === "walk" ? "WALK" : "GALLOP"} (Keyboard: ${
-          nextMode === "walk" ? "W" : "G"
-        })`
+        `Gait Shift: ${nextMode === "walk" ? "WALK" : "GALLOP"}`
       );
-      setSceneState((current) => {
+      setPhysiologyProfileState((current) => {
         if (current === "mild-stress" || current === "recovery") {
           return current;
         }
@@ -666,16 +710,19 @@ export function useDashboardSimulation(): SimulationState {
     [appendEvent]
   );
 
-  const setScene = useCallback(
-    (nextScene: DemoScene) => {
-      setSceneState(nextScene);
-      setModeState(SCENE_TO_MODE[nextScene]);
-      if (nextScene === "mild-stress") {
+  const setPhysiologyProfile = useCallback(
+    (nextProfile: PhysiologyProfile) => {
+      setPhysiologyProfileState(nextProfile);
+      setModeState(PROFILE_TO_MODE[nextProfile]);
+      if (nextProfile === "mild-stress") {
         appendEvent("alert", "Stress Signature Escalating", "YELLOW");
-      } else if (nextScene === "recovery") {
+      } else if (nextProfile === "recovery") {
         appendEvent("event", "Recovery Sequence Initiated");
       } else {
-        appendEvent("event", `Demo Scene: ${nextScene.replaceAll("-", " ").toUpperCase()}`);
+        appendEvent(
+          "event",
+          `Physiology Profile: ${nextProfile.replaceAll("-", " ").toUpperCase()}`
+        );
       }
     },
     [appendEvent]
@@ -689,7 +736,7 @@ export function useDashboardSimulation(): SimulationState {
     setPhaseClockMs(0);
     setTimestampLabel(formatTimestamp(new Date()));
     setMetrics(createBaselineMetrics());
-    setSceneState("healthy-walk");
+    setPhysiologyProfileState("healthy-walk");
     setModeState("walk");
     appendEvent("note", "Baseline re-established.");
   }, [appendEvent]);
@@ -722,11 +769,16 @@ export function useDashboardSimulation(): SimulationState {
       setTimestampLabel(formatTimestamp(new Date()));
 
       setMetrics((currentMetrics) => {
-        const ranges = sceneRanges(gaitBlendRef.current, scene);
+        const ranges = profileRanges(gaitBlendRef.current, physiologyProfile);
 
         return currentMetrics.map((metric) => {
           const target = midpoint(ranges[metric.key]);
-          const noise = sinusoidalNoise(tickRef.current, metric.key, gaitBlendRef.current, scene);
+          const noise = sinusoidalNoise(
+            tickRef.current,
+            metric.key,
+            gaitBlendRef.current,
+            physiologyProfile
+          );
           const nextValue = lerp(metric.value, target + noise, EMA_FACTOR);
 
           const clamped =
@@ -747,14 +799,20 @@ export function useDashboardSimulation(): SimulationState {
             value: displayedValue,
             history: nextHistory,
             displayRange: computeGraphRange(metric.key, nextHistory),
-            status: metricStatus(metric.key, displayedValue, ranges, scene, gaitBlendRef.current),
+            status: metricStatus(
+              metric.key,
+              displayedValue,
+              ranges,
+              physiologyProfile,
+              gaitBlendRef.current
+            ),
           };
         });
       });
     }, UPDATE_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [mode, scene]);
+  }, [mode, physiologyProfile]);
 
   const gaitBlend = gaitBlendRef.current;
   const stridePattern = useMemo(() => interpolateStridePattern(gaitBlend), [gaitBlend]);
@@ -767,17 +825,21 @@ export function useDashboardSimulation(): SimulationState {
   }, [gaitBlend, phaseClockMs]);
 
   const hoofLoads = useMemo(() => getHoofLoads(stridePattern, stridePhase), [stridePattern, stridePhase]);
+  const hoofPressures = useMemo(
+    () => getHoofPressures(hoofLoads, gaitBlend),
+    [hoofLoads, gaitBlend]
+  );
 
   const symmetryScore = useMemo(() => {
-    const base = SCENE_SYMMETRY[scene];
+    const base = PROFILE_SYMMETRY[physiologyProfile];
     const drift = Math.sin(elapsedMs * 0.0013) * 0.35;
     return clamp(base + drift, 86, 99.8);
-  }, [elapsedMs, scene]);
+  }, [elapsedMs, physiologyProfile]);
 
-  const overallScore = useMemo(() => SCENE_SCORE[scene], [scene]);
+  const overallScore = useMemo(() => PROFILE_SCORE[physiologyProfile], [physiologyProfile]);
 
-  const status = useMemo(() => SCENE_STATUS[scene], [scene]);
-  const summaryText = useMemo(() => SCENE_SUMMARY[scene], [scene]);
+  const status = useMemo(() => PROFILE_STATUS[physiologyProfile], [physiologyProfile]);
+  const summaryText = useMemo(() => PROFILE_SUMMARY[physiologyProfile], [physiologyProfile]);
 
   const strideFrequencyLabel = `${lerp(1.14, 0.45, gaitBlend).toFixed(2)} s/m`;
   const contactSummary = `LF(${lerp(0.2, 0.15, gaitBlend).toFixed(2)}s), RF(${lerp(
@@ -792,13 +854,14 @@ export function useDashboardSimulation(): SimulationState {
 
   return {
     mode,
-    scene,
+    physiologyProfile,
     status,
     overallScore,
     sessionLabel: formatSession(elapsedMs),
     timestampLabel,
     metrics,
     hoofLoads,
+    hoofPressures,
     stridePhase,
     stridePattern,
     strideFrequencyLabel,
@@ -811,10 +874,9 @@ export function useDashboardSimulation(): SimulationState {
       breed: "Thoroughbred",
       age: "6 yr",
     },
-    commandsLabel: "W/G/1/2/3/4/R/M",
     muted,
     setMode,
-    setScene,
+    setPhysiologyProfile,
     reset,
     toggleMute,
   };

@@ -8,11 +8,12 @@ import { interpolateRgbBasis } from "d3-interpolate";
 import { scaleSequential } from "d3-scale";
 import horseVideo from "../Horse_Treadmill_Animation_Generated_noaudio.mp4";
 import {
-  type DemoScene,
   type EventItem,
   type GaitMode,
   type HoofLoads,
+  type HoofPressures,
   type MetricState,
+  type PhysiologyProfile,
   type StatusLevel,
   type StridePattern,
   type StrideWindow,
@@ -31,7 +32,7 @@ const METRIC_STATUS_LABELS: Record<StatusLevel, string> = {
   alert: "ALERT",
 };
 
-const SCENE_SHORTCUTS: Record<string, DemoScene> = {
+const PROFILE_SHORTCUTS: Record<string, PhysiologyProfile> = {
   "1": "healthy-walk",
   "2": "healthy-gallop",
   "3": "mild-stress",
@@ -116,15 +117,7 @@ const HOOF_ACCENT_SHAPES: Record<keyof HoofLoads, HoofAccentShape[]> = {
   ],
 };
 
-const HOOF_VISUAL_PROFILE: Record<
-  keyof HoofLoads,
-  { floor: number; intensityScale: number; accentScale: number }
-> = {
-  LF: { floor: 0.01, intensityScale: 0.42, accentScale: 0.42 },
-  RF: { floor: 0.08, intensityScale: 1.04, accentScale: 1.04 },
-  LH: { floor: 0.1, intensityScale: 1.1, accentScale: 1.16 },
-  RH: { floor: 0.02, intensityScale: 0.4, accentScale: 0.4 },
-};
+const MAX_HOOF_PRESSURE_KPA = 360;
 
 const INTEGER_FORMATTER = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 0,
@@ -144,7 +137,7 @@ function formatNumber(value: number, decimals: number) {
 function App() {
   const simulation = useDashboardSimulation();
   const deferredMetrics = useDeferredValue(simulation.metrics);
-  const { reset, setMode, setScene, toggleMute } = simulation;
+  const { reset, setMode, setPhysiologyProfile, toggleMute } = simulation;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -154,8 +147,8 @@ function App() {
         startTransition(() => setMode("walk"));
       } else if (key === "g") {
         startTransition(() => setMode("gallop"));
-      } else if (key in SCENE_SHORTCUTS) {
-        startTransition(() => setScene(SCENE_SHORTCUTS[key]));
+      } else if (key in PROFILE_SHORTCUTS) {
+        startTransition(() => setPhysiologyProfile(PROFILE_SHORTCUTS[key]));
       } else if (key === "r") {
         startTransition(() => reset());
       } else if (key === "m") {
@@ -166,7 +159,7 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
 
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [reset, setMode, setScene, toggleMute]);
+  }, [reset, setMode, setPhysiologyProfile, toggleMute]);
 
   return (
     <main className="app-shell">
@@ -179,7 +172,6 @@ function App() {
           profile={simulation.profile}
           status={simulation.status}
           timestampLabel={simulation.timestampLabel}
-          videoSrc={horseVideo}
         />
 
         <div className="panel-grid">
@@ -187,7 +179,6 @@ function App() {
             mode={simulation.mode}
             status={simulation.status}
             videoSrc={horseVideo}
-            commandsLabel={simulation.commandsLabel}
           />
 
           <VitalsPanel
@@ -196,7 +187,7 @@ function App() {
           />
 
           <HoofForcePanel
-            hoofLoads={simulation.hoofLoads}
+            hoofPressures={simulation.hoofPressures}
             strideFrequencyLabel={simulation.strideFrequencyLabel}
             symmetryScore={simulation.symmetryScore}
             contactSummary={simulation.contactSummary}
@@ -223,7 +214,6 @@ function TopBar({
   profile,
   status,
   timestampLabel,
-  videoSrc,
 }: {
   mode: GaitMode;
   muted: boolean;
@@ -234,7 +224,6 @@ function TopBar({
   };
   status: StatusLevel;
   timestampLabel: string;
-  videoSrc: string;
 }) {
   return (
     <header className="topbar panel">
@@ -244,11 +233,6 @@ function TopBar({
           <h1>Equine Health Monitor</h1>
           <StatusPill status={status} />
         </div>
-      </div>
-
-      <div className="topbar-center" aria-hidden="true">
-        <CircularVideo videoSrc={videoSrc} />
-        <CircularVideo videoSrc={videoSrc} delayed />
       </div>
 
       <div className="topbar-profile panel inset-panel">
@@ -275,27 +259,6 @@ function TopBar({
   );
 }
 
-function CircularVideo({
-  delayed = false,
-  videoSrc,
-}: {
-  delayed?: boolean;
-  videoSrc: string;
-}) {
-  return (
-    <div className={`circle-video ${delayed ? "circle-video--delayed" : ""}`}>
-      <video
-        autoPlay
-        loop
-        muted
-        playsInline
-        src={videoSrc}
-      />
-      <div className="circle-video-glow" />
-    </div>
-  );
-}
-
 function StatusPill({ status }: { status: StatusLevel }) {
   return (
     <div className={`status-pill status-pill--${status}`}>
@@ -306,12 +269,10 @@ function StatusPill({ status }: { status: StatusLevel }) {
 }
 
 function HorsePanel({
-  commandsLabel,
   mode,
   status,
   videoSrc,
 }: {
-  commandsLabel: string;
   mode: GaitMode;
   status: StatusLevel;
   videoSrc: string;
@@ -334,7 +295,6 @@ function HorsePanel({
             label="Current Gait"
             value={mode === "walk" ? "Walk" : "Gallop"}
             accent={status === "healthy" ? "green" : "amber"}
-            suffix={<span className="key-hint">(Key: {mode === "walk" ? "W" : "G"})</span>}
           />
         </div>
 
@@ -350,7 +310,6 @@ function HorsePanel({
             />
             <div className="horse-grid-overlay" />
             <div className="horse-vignette" />
-            <div className="command-chip">Keyboard Commands {commandsLabel}</div>
           </div>
         </div>
       </div>
@@ -476,7 +435,7 @@ function SparklineChart({
 
 function HoofForcePanel({
   contactSummary,
-  hoofLoads,
+  hoofPressures,
   mode,
   strideFrequencyLabel,
   stridePhase,
@@ -484,7 +443,7 @@ function HoofForcePanel({
   symmetryScore,
 }: {
   contactSummary: string;
-  hoofLoads: HoofLoads;
+  hoofPressures: HoofPressures;
   mode: GaitMode;
   strideFrequencyLabel: string;
   stridePhase: number;
@@ -501,7 +460,10 @@ function HoofForcePanel({
         <div className="hoof-map">
           {HOOF_ORDER.map((hoof) => (
             <div className="hoof-node" key={hoof}>
-              <HoofGlyph intensity={hoofLoads[hoof]} label={hoof} />
+              <HoofGlyph
+                label={hoof}
+                pressureKpa={hoofPressures[hoof]}
+              />
             </div>
           ))}
         </div>
@@ -629,37 +591,35 @@ function isStrideWindowActive(window: StrideWindow, stridePhase: number) {
 }
 
 function HoofGlyph({
-  intensity,
   label,
+  pressureKpa,
 }: {
-  intensity: number;
   label: keyof HoofLoads;
+  pressureKpa: number;
 }) {
   const blobLayouts = HOOF_BLOB_LAYOUTS[label];
   const accentShapes = HOOF_ACCENT_SHAPES[label];
-  const visualProfile = HOOF_VISUAL_PROFILE[label];
   const idBase = `hoof-${label.toLowerCase()}`;
-  const visibleIntensity =
-    visualProfile.floor + intensity * (1 - visualProfile.floor) * visualProfile.intensityScale;
-  const coreColor = pressureColorScale(Math.min(1, visibleIntensity + 0.14));
-  const midColor = pressureColorScale(Math.max(0.12, visibleIntensity * 0.82));
-  const auraColor = pressureColorScale(Math.max(0.12, visibleIntensity * 0.58));
-  const outerGlowOpacity = 0.04 + visibleIntensity * 0.14 * visualProfile.accentScale;
+  const visibleIntensity = Math.max(0, Math.min(1, pressureKpa / MAX_HOOF_PRESSURE_KPA));
+  const coreColor = pressureColorScale(Math.max(0.08, visibleIntensity));
+  const midColor = pressureColorScale(Math.max(0.06, visibleIntensity * 0.78));
+  const auraColor = pressureColorScale(Math.max(0.04, visibleIntensity * 0.54));
+  const outerGlowOpacity = visibleIntensity <= 0 ? 0 : 0.02 + visibleIntensity * 0.18;
   const blobs = blobLayouts.map((blob, index) => {
-    const blobValue = Math.min(1, 0.18 + visibleIntensity * blob.weight);
+    const blobValue = Math.min(1, visibleIntensity * blob.weight);
     return {
       ...blob,
       id: `${idBase}-grad-${index}`,
       value: blobValue,
-      rx: blob.rx + visibleIntensity * 7,
-      ry: blob.ry + visibleIntensity * 8,
-      opacity: 0.28 + blobValue * 0.76,
+      rx: blob.rx + visibleIntensity * 6,
+      ry: blob.ry + visibleIntensity * 7,
+      opacity: blobValue <= 0 ? 0 : 0.08 + blobValue * 0.92,
     };
   });
   const renderedAccentShapes = accentShapes.map((shape, index) => ({
     ...shape,
     id: `${idBase}-accent-${index}`,
-    opacity: 0.12 + visibleIntensity * shape.weight * 0.74 * visualProfile.accentScale,
+    opacity: visibleIntensity * shape.weight * 0.7,
   }));
 
   return (
@@ -670,30 +630,30 @@ function HoofGlyph({
             <path d={HOOF_CLIP_PATH} />
           </clipPath>
           <filter id={`${idBase}-glow`} x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation={6 + intensity * 4} result="blur" />
+            <feGaussianBlur stdDeviation={4 + visibleIntensity * 6} result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
           <filter id={`${idBase}-outer`} x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation={12 + intensity * 5} />
+            <feGaussianBlur stdDeviation={8 + visibleIntensity * 7} />
           </filter>
           {blobs.map((blob) => (
             <radialGradient id={blob.id} cx="50%" cy="50%" key={blob.id} r="65%">
               <stop
                 offset="0%"
-                stopColor={pressureColorScale(Math.min(1, blob.value + 0.18))}
+                stopColor={pressureColorScale(Math.min(1, blob.value + 0.08))}
                 stopOpacity={0.96}
               />
               <stop
                 offset="58%"
-                stopColor={pressureColorScale(Math.max(0.1, blob.value * 0.84))}
+                stopColor={pressureColorScale(Math.max(0.06, blob.value * 0.84))}
                 stopOpacity={Math.min(0.9, blob.opacity)}
               />
               <stop
                 offset="100%"
-                stopColor={pressureColorScale(Math.max(0.08, blob.value * 0.42))}
+                stopColor={pressureColorScale(Math.max(0.04, blob.value * 0.42))}
                 stopOpacity="0"
               />
             </radialGradient>
@@ -705,8 +665,8 @@ function HoofGlyph({
           fill={auraColor}
           filter={`url(#${idBase}-outer)`}
           opacity={outerGlowOpacity}
-          rx={28 + visibleIntensity * 10}
-          ry={44 + visibleIntensity * 14}
+          rx={24 + visibleIntensity * 14}
+          ry={38 + visibleIntensity * 16}
         />
         <path
           d={HOOF_OUTLINE_PATH}
@@ -720,7 +680,7 @@ function HoofGlyph({
             cx="60"
             cy="49"
             fill={midColor}
-            opacity={0.05 + visibleIntensity * 0.08}
+            opacity={visibleIntensity * 0.14}
             rx="24"
             ry="34"
           />
@@ -780,13 +740,16 @@ function HoofGlyph({
         <path
           d="M60 18 C76 18 87 30 90 48"
           fill="none"
-          opacity={0.4 + visibleIntensity * 0.18}
+          opacity={visibleIntensity * 0.34}
           stroke={coreColor}
           strokeLinecap="round"
           strokeWidth="1.6"
         />
       </svg>
       <span className="hoof-label">{label}</span>
+      <span className="hoof-pressure">
+        {INTEGER_FORMATTER.format(pressureKpa)} <small>kPa</small>
+      </span>
     </div>
   );
 }
