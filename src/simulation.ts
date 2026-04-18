@@ -368,6 +368,18 @@ function lerp(current: number, target: number, factor: number) {
   return current + (target - current) * factor;
 }
 
+function getFrameTransitionFactor(baseFactor: number, deltaMs: number, intervalMs: number) {
+  if (deltaMs <= 0) {
+    return 0;
+  }
+
+  return 1 - Math.pow(1 - baseFactor, deltaMs / intervalMs);
+}
+
+function normalizePhase(value: number) {
+  return ((value % 1) + 1) % 1;
+}
+
 function interpolateRange(start: MetricRange, end: MetricRange, amount: number): MetricRange {
   return [lerp(start[0], end[0], amount), lerp(start[1], end[1], amount)];
 }
@@ -670,11 +682,14 @@ export function useDashboardSimulation(): SimulationState {
   const [metrics, setMetrics] = useState<MetricState[]>(createBaselineMetrics);
   const [events, setEvents] = useState<EventItem[]>(() => createInitialEvents(bootedAtRef.current));
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [phaseClockMs, setPhaseClockMs] = useState(0);
+  const [stridePhase, setStridePhase] = useState(STRIDE_PHASE_OFFSET.walk);
   const [timestampLabel, setTimestampLabel] = useState(() => formatTimestamp(bootedAtRef.current));
   const [muted, setMuted] = useState(true);
   const tickRef = useRef(0);
+  const modeRef = useRef<GaitMode>("walk");
   const gaitBlendRef = useRef(0);
+  const stridePhaseBaseRef = useRef(0);
+  const animationFrameTimeRef = useRef<number | null>(null);
 
   const appendEvent = useCallback((kind: EventKind, label: string, severityLabel?: string) => {
     setEvents((current) =>
@@ -684,6 +699,7 @@ export function useDashboardSimulation(): SimulationState {
 
   const setMode = useCallback(
     (nextMode: GaitMode) => {
+      modeRef.current = nextMode;
       setModeState(nextMode);
       appendEvent(
         "event",
@@ -702,6 +718,7 @@ export function useDashboardSimulation(): SimulationState {
 
   const setPhysiologyProfile = useCallback(
     (nextProfile: PhysiologyProfile) => {
+      modeRef.current = PROFILE_TO_MODE[nextProfile];
       setPhysiologyProfileState(nextProfile);
       setModeState(PROFILE_TO_MODE[nextProfile]);
       if (nextProfile === "mild-stress") {
@@ -722,9 +739,12 @@ export function useDashboardSimulation(): SimulationState {
     const restartedAt = new Date();
     startedAtRef.current = restartedAt.getTime();
     tickRef.current = 0;
+    modeRef.current = "walk";
     gaitBlendRef.current = 0;
+    stridePhaseBaseRef.current = 0;
+    animationFrameTimeRef.current = null;
     setElapsedMs(0);
-    setPhaseClockMs(0);
+    setStridePhase(STRIDE_PHASE_OFFSET.walk);
     setTimestampLabel(formatTimestamp(restartedAt));
     setMetrics(createBaselineMetrics());
     setPhysiologyProfileState("healthy-walk");
@@ -737,10 +757,42 @@ export function useDashboardSimulation(): SimulationState {
   }, []);
 
   useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
     let frameId = 0;
 
-    const tick = () => {
-      setPhaseClockMs(Date.now() - startedAtRef.current);
+    const tick = (now: number) => {
+      const previousFrameAt = animationFrameTimeRef.current ?? now;
+      const deltaMs = Math.min(48, Math.max(0, now - previousFrameAt));
+      animationFrameTimeRef.current = now;
+
+      const gaitTarget = modeRef.current === "gallop" ? 1 : 0;
+      const nextGaitBlend = lerp(
+        gaitBlendRef.current,
+        gaitTarget,
+        getFrameTransitionFactor(GAIT_TRANSITION_FACTOR, deltaMs, UPDATE_INTERVAL_MS)
+      );
+      gaitBlendRef.current =
+        Math.abs(nextGaitBlend - gaitTarget) < 0.001 ? gaitTarget : nextGaitBlend;
+
+      const strideDuration = lerp(
+        STRIDE_DURATION_MS.walk,
+        STRIDE_DURATION_MS.gallop,
+        gaitBlendRef.current
+      );
+      stridePhaseBaseRef.current = normalizePhase(
+        stridePhaseBaseRef.current + (deltaMs * STRIDE_PHASE_TIME_SCALE) / strideDuration
+      );
+
+      const phaseOffset = lerp(
+        STRIDE_PHASE_OFFSET.walk,
+        STRIDE_PHASE_OFFSET.gallop,
+        gaitBlendRef.current
+      );
+      setStridePhase(normalizePhase(stridePhaseBaseRef.current + phaseOffset));
+
       frameId = window.requestAnimationFrame(tick);
     };
 
@@ -752,10 +804,6 @@ export function useDashboardSimulation(): SimulationState {
   useEffect(() => {
     const interval = window.setInterval(() => {
       tickRef.current += 1;
-      const gaitTarget = mode === "gallop" ? 1 : 0;
-      const nextGaitBlend = lerp(gaitBlendRef.current, gaitTarget, GAIT_TRANSITION_FACTOR);
-      gaitBlendRef.current =
-        Math.abs(nextGaitBlend - gaitTarget) < 0.001 ? gaitTarget : nextGaitBlend;
       setElapsedMs(Date.now() - startedAtRef.current);
       setTimestampLabel(formatTimestamp(new Date()));
 
@@ -803,17 +851,10 @@ export function useDashboardSimulation(): SimulationState {
     }, UPDATE_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [mode, physiologyProfile]);
+  }, [physiologyProfile]);
 
   const gaitBlend = gaitBlendRef.current;
   const stridePattern = useMemo(() => interpolateStridePattern(gaitBlend), [gaitBlend]);
-
-  const stridePhase = useMemo(() => {
-    const duration = lerp(STRIDE_DURATION_MS.walk, STRIDE_DURATION_MS.gallop, gaitBlend);
-    const phaseOffset = lerp(STRIDE_PHASE_OFFSET.walk, STRIDE_PHASE_OFFSET.gallop, gaitBlend);
-    const phaseElapsed = phaseClockMs * STRIDE_PHASE_TIME_SCALE;
-    return (((phaseElapsed % duration) / duration) + phaseOffset) % 1;
-  }, [gaitBlend, phaseClockMs]);
 
   const hoofLoads = useMemo(() => getHoofLoads(stridePattern, stridePhase), [stridePattern, stridePhase]);
   const hoofPressures = useMemo(

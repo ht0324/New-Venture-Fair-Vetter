@@ -692,6 +692,14 @@ select {
   opacity: 0.42;
 }
 
+.phase-lane__window--echo {
+  background: linear-gradient(90deg, rgba(77, 198, 255, 0.16), rgba(97, 246, 235, 0.24));
+  box-shadow:
+    0 0 6px rgba(84, 221, 255, 0.05),
+    inset 0 0 0 1px rgba(213, 249, 255, 0.05);
+  opacity: 0.28;
+}
+
 .phase-lane__window--active {
   background: linear-gradient(90deg, rgba(118, 230, 255, 0.8), rgba(128, 255, 228, 0.96));
   box-shadow:

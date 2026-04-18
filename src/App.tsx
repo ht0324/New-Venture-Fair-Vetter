@@ -39,6 +39,18 @@ const PROFILE_SHORTCUTS: Record<string, PhysiologyProfile> = {
   "4": "recovery",
 };
 
+const GAIT_KEY_SHORTCUTS: Record<string, GaitMode> = {
+  w: "walk",
+  "ㅈ": "walk",
+  g: "gallop",
+  "ㅎ": "gallop",
+};
+
+const GAIT_CODE_SHORTCUTS: Record<string, GaitMode> = {
+  KeyW: "walk",
+  KeyG: "gallop",
+};
+
 const HOOF_ORDER: Array<keyof HoofLoads> = ["LF", "RF", "LH", "RH"];
 
 type PressureBlob = {
@@ -142,11 +154,10 @@ function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const key = event.key.toLowerCase();
+      const gaitShortcut = GAIT_CODE_SHORTCUTS[event.code] ?? GAIT_KEY_SHORTCUTS[key];
 
-      if (key === "w") {
-        startTransition(() => setMode("walk"));
-      } else if (key === "g") {
-        startTransition(() => setMode("gallop"));
+      if (gaitShortcut) {
+        startTransition(() => setMode(gaitShortcut));
       } else if (key in PROFILE_SHORTCUTS) {
         startTransition(() => setPhysiologyProfile(PROFILE_SHORTCUTS[key]));
       } else if (key === "r") {
@@ -525,7 +536,7 @@ function StridePhaseTimeline({
 
         {HOOF_ORDER.map((hoof) => {
           const window = stridePattern[hoof];
-          const segments = expandStrideSegments(window);
+          const segments = buildStrideDisplaySegments(window, mode);
           const active = isStrideWindowActive(window, stridePhase);
 
           return (
@@ -538,9 +549,13 @@ function StridePhaseTimeline({
                 {segments.map((segment, index) => (
                   <span
                     className={`phase-lane__window${
-                      active ? " phase-lane__window--active" : ""
+                      segment.kind === "echo" ? " phase-lane__window--echo" : ""
+                    }${
+                      active && segment.kind === "primary"
+                        ? " phase-lane__window--active"
+                        : ""
                     }`}
-                    key={`${hoof}-${index}-${segment.start}-${segment.end}`}
+                    key={`${hoof}-${segment.kind}-${index}-${segment.start}-${segment.end}`}
                     style={{
                       left: `${segment.start * 100}%`,
                       width: `${Math.max(2, (segment.end - segment.start) * 100)}%`,
@@ -560,6 +575,31 @@ function StridePhaseTimeline({
       </div>
     </div>
   );
+}
+
+function buildStrideDisplaySegments(window: StrideWindow, mode: GaitMode) {
+  const primarySegments = expandStrideSegments(window).map((segment) => ({
+    ...segment,
+    kind: "primary" as const,
+  }));
+
+  if (mode !== "gallop") {
+    return primarySegments;
+  }
+
+  const cycleStart = normalizePhase(window.start);
+  const cycleEnd = window.end <= 1 ? window.end : window.end - 1;
+  const cycleSpan = cycleEnd >= cycleStart ? cycleEnd - cycleStart : cycleEnd + 1 - cycleStart;
+  const echoOffset = Math.max(0.4, 1 - cycleSpan);
+  const echoSegments = expandStrideSegments({
+    start: cycleStart + echoOffset,
+    end: cycleStart + echoOffset + cycleSpan,
+  }).map((segment) => ({
+    ...segment,
+    kind: "echo" as const,
+  }));
+
+  return [...primarySegments, ...echoSegments];
 }
 
 function expandStrideSegments(window: StrideWindow) {
@@ -602,26 +642,26 @@ function HoofGlyph({
   const idBase = `hoof-${label.toLowerCase()}`;
   const visibleIntensity = Math.max(0, Math.min(1, pressureKpa / MAX_HOOF_PRESSURE_KPA));
   const glowIntensity =
-    visibleIntensity <= 0 ? 0 : Math.min(1, Math.pow(visibleIntensity, 0.82) * 1.08);
-  const coreColor = pressureColorScale(Math.max(0.12, glowIntensity));
-  const midColor = pressureColorScale(Math.max(0.09, glowIntensity * 0.84));
-  const auraColor = pressureColorScale(Math.max(0.06, glowIntensity * 0.62));
-  const outerGlowOpacity = glowIntensity <= 0 ? 0 : 0.05 + glowIntensity * 0.22;
+    visibleIntensity <= 0 ? 0 : Math.min(1, Math.pow(visibleIntensity, 0.72) * 1.18);
+  const coreColor = pressureColorScale(Math.max(0.18, glowIntensity));
+  const midColor = pressureColorScale(Math.max(0.14, glowIntensity * 0.9));
+  const auraColor = pressureColorScale(Math.max(0.1, glowIntensity * 0.72));
+  const outerGlowOpacity = glowIntensity <= 0 ? 0 : 0.08 + glowIntensity * 0.28;
   const blobs = blobLayouts.map((blob, index) => {
     const blobValue = Math.min(1, glowIntensity * blob.weight);
     return {
       ...blob,
       id: `${idBase}-grad-${index}`,
       value: blobValue,
-      rx: blob.rx + glowIntensity * 7,
-      ry: blob.ry + glowIntensity * 8,
-      opacity: blobValue <= 0 ? 0 : 0.12 + blobValue * 0.96,
+      rx: blob.rx + glowIntensity * 8,
+      ry: blob.ry + glowIntensity * 9,
+      opacity: blobValue <= 0 ? 0 : 0.18 + blobValue * 0.98,
     };
   });
   const renderedAccentShapes = accentShapes.map((shape, index) => ({
     ...shape,
     id: `${idBase}-accent-${index}`,
-    opacity: glowIntensity * shape.weight * 0.82,
+    opacity: glowIntensity * shape.weight * 0.96,
   }));
 
   return (
@@ -632,30 +672,30 @@ function HoofGlyph({
             <path d={HOOF_CLIP_PATH} />
           </clipPath>
           <filter id={`${idBase}-glow`} x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation={5 + glowIntensity * 7} result="blur" />
+            <feGaussianBlur stdDeviation={6 + glowIntensity * 8} result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
           <filter id={`${idBase}-outer`} x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation={10 + glowIntensity * 8} />
+            <feGaussianBlur stdDeviation={12 + glowIntensity * 10} />
           </filter>
           {blobs.map((blob) => (
             <radialGradient id={blob.id} cx="50%" cy="50%" key={blob.id} r="65%">
               <stop
                 offset="0%"
-                stopColor={pressureColorScale(Math.min(1, blob.value + 0.14))}
-                stopOpacity={0.98}
+                stopColor={pressureColorScale(Math.min(1, blob.value + 0.2))}
+                stopOpacity={1}
               />
               <stop
                 offset="58%"
-                stopColor={pressureColorScale(Math.max(0.08, blob.value * 0.9))}
-                stopOpacity={Math.min(0.96, blob.opacity)}
+                stopColor={pressureColorScale(Math.max(0.12, blob.value * 0.96))}
+                stopOpacity={Math.min(1, blob.opacity)}
               />
               <stop
                 offset="100%"
-                stopColor={pressureColorScale(Math.max(0.06, blob.value * 0.5))}
+                stopColor={pressureColorScale(Math.max(0.08, blob.value * 0.58))}
                 stopOpacity="0"
               />
             </radialGradient>
@@ -667,8 +707,8 @@ function HoofGlyph({
           fill={auraColor}
           filter={`url(#${idBase}-outer)`}
           opacity={outerGlowOpacity}
-          rx={28 + glowIntensity * 16}
-          ry={42 + glowIntensity * 18}
+          rx={32 + glowIntensity * 18}
+          ry={46 + glowIntensity * 20}
         />
         <path
           d={HOOF_OUTLINE_PATH}
@@ -682,7 +722,7 @@ function HoofGlyph({
             cx="60"
             cy="49"
             fill={midColor}
-            opacity={glowIntensity * 0.2}
+            opacity={glowIntensity * 0.28}
             rx="24"
             ry="34"
           />
@@ -742,7 +782,7 @@ function HoofGlyph({
         <path
           d="M60 18 C76 18 87 30 90 48"
           fill="none"
-          opacity={glowIntensity * 0.46}
+          opacity={glowIntensity * 0.58}
           stroke={coreColor}
           strokeLinecap="round"
           strokeWidth="1.6"
