@@ -93,6 +93,7 @@ type MetricRanges = Record<MetricKey, MetricRange>;
 
 const UPDATE_INTERVAL_MS = 320;
 const HISTORY_LENGTH = 64;
+const MAX_EVENT_HISTORY = 12;
 const EMA_FACTOR = 0.12;
 const VITAL_TIME_SCALE = 0.5;
 const GAIT_TRANSITION_FACTOR = 0.035;
@@ -694,7 +695,7 @@ export function useDashboardSimulation(): SimulationState {
 
   const appendEvent = useCallback((kind: EventKind, label: string, severityLabel?: string) => {
     setEvents((current) =>
-      [createEventItem(kind, label, severityLabel), ...current].slice(0, 6)
+      [createEventItem(kind, label, severityLabel), ...current].slice(0, MAX_EVENT_HISTORY)
     );
   }, []);
 

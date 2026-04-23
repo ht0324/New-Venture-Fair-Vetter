@@ -665,11 +665,18 @@ select {
   padding: var(--panel-pad);
 }
 
+.hoof-visuals {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
 .hoof-map {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(4, minmax(82px, 1fr));
   align-items: end;
+  min-height: 0;
   padding: 18px 0 2px;
 }
 
@@ -1213,43 +1220,65 @@ select {
   }
 
   .metric-list {
-    align-content: center;
-    gap: 10px;
+    align-content: stretch;
+    gap: 0;
+    grid-template-rows: repeat(5, minmax(0, 1fr));
   }
 
   .metric-row {
-    gap: 14px;
-    grid-template-columns: var(--metric-meta-width) minmax(0, 1fr) 86px;
+    gap: 16px;
+    grid-template-columns: 210px minmax(0, 1fr) 88px;
   }
 
   .metric-value {
-    font-size: 2.05rem;
+    font-size: 2.7rem;
+    line-height: 0.95;
     letter-spacing: 0;
   }
 
+  .metric-value small {
+    font-size: 0.82rem;
+  }
+
   .sparkline {
-    height: 56px;
+    height: 62px;
+    border-radius: 13px;
   }
 
   .mini-status {
-    min-width: 86px;
-    padding: 7px 12px;
+    min-width: 88px;
+    padding: 7px 11px;
   }
 
   .hoof-panel {
-    align-items: start;
+    align-items: stretch;
     gap: 18px;
     grid-template-columns: minmax(0, 1.18fr) minmax(520px, 0.86fr);
   }
 
   .hoof-map {
-    align-items: start;
-    padding-top: 8px;
+    align-content: center;
+    align-items: center;
+    gap: 18px;
+    padding: 0 0 4px;
   }
 
   .hoof-glyph {
-    width: 104px;
-    height: 126px;
+    width: clamp(136px, 6.2vw, 160px);
+    height: clamp(164px, 7.5vw, 194px);
+  }
+
+  .hoof-glyph-wrap {
+    gap: 8px;
+  }
+
+  .hoof-label {
+    font-size: 0.92rem;
+    letter-spacing: 0.04em;
+  }
+
+  .hoof-pressure {
+    font-size: 0.9rem;
   }
 
   .stride-summary {
@@ -1262,6 +1291,15 @@ select {
 
   .alert-log {
     min-height: 0;
+  }
+
+  .alert-log__items {
+    gap: 2px;
+  }
+
+  .alert-row {
+    font-size: 0.68rem;
+    line-height: 1.14;
   }
 }
 

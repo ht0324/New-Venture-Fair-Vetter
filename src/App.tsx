@@ -59,6 +59,7 @@ const GAIT_CODE_SHORTCUTS: Record<string, GaitMode> = {
 
 const HOOF_ORDER: Array<keyof HoofLoads> = ["LF", "RF", "LH", "RH"];
 const HORSE_VIDEO_LAYERS = [0, 1] as const;
+const VISIBLE_ALERT_LOG_ROWS = 8;
 const VIDEO_SWAP_SETTLE_MS = 48;
 
 type HorseClip = "walk-loop" | "walk-to-gallop" | "gallop-loop" | "gallop-to-walk";
@@ -1229,7 +1230,7 @@ function AlertPanel({
       <div className="alert-log inset-panel">
         <span className="micro-label">Alert Log (History)</span>
         <div className="alert-log__items">
-          {events.slice(0, 3).map((event) => (
+          {events.slice(0, VISIBLE_ALERT_LOG_ROWS).map((event) => (
             <AlertRow event={event} key={event.id} />
           ))}
         </div>
