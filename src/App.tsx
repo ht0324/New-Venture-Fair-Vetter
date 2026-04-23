@@ -9,7 +9,9 @@ import {
 } from "react";
 import { interpolateRgbBasis } from "d3-interpolate";
 import { scaleSequential } from "d3-scale";
+import horseGallopLoopVideo from "../Horse_Gallop_Loop.mp4";
 import horseGallopStartVideo from "../Horse_Gallop_Start.mp4";
+import horseGallopToWalkVideo from "../Horse_Gallop_To_Walk.mp4";
 import horseWalkLoopVideo from "../Horse_Treadmill_Animation_Generated_noaudio.mp4";
 import {
   type EventItem,
@@ -56,6 +58,63 @@ const GAIT_CODE_SHORTCUTS: Record<string, GaitMode> = {
 };
 
 const HOOF_ORDER: Array<keyof HoofLoads> = ["LF", "RF", "LH", "RH"];
+const HORSE_VIDEO_LAYERS = [0, 1] as const;
+const VIDEO_SWAP_SETTLE_MS = 48;
+
+type HorseClip = "walk-loop" | "walk-to-gallop" | "gallop-loop" | "gallop-to-walk";
+type HorseVideoLayerIndex = (typeof HORSE_VIDEO_LAYERS)[number];
+type HorseVideoLayer = {
+  clip: HorseClip;
+  src: string;
+  token: number;
+};
+type DeviceIconName = "battery" | "bluetooth" | "girth" | "hoof";
+
+const DEVICE_STATUS_ITEMS: Array<{
+  id: string;
+  battery: number;
+  detail: string;
+  icon: DeviceIconName;
+  label: string;
+}> = [
+  {
+    id: "girth",
+    battery: 84,
+    detail: "Core strap",
+    icon: "girth",
+    label: "Girth Band",
+  },
+  {
+    id: "hoof",
+    battery: 73,
+    detail: "LF RF LH RH",
+    icon: "hoof",
+    label: "Hoof Pods",
+  },
+];
+
+function getNextHorseClip(clip: HorseClip, targetMode: GaitMode): HorseClip | null {
+  if (clip === "walk-loop") {
+    return targetMode === "gallop" ? "walk-to-gallop" : null;
+  }
+
+  if (clip === "walk-to-gallop") {
+    return targetMode === "gallop" ? "gallop-loop" : "walk-loop";
+  }
+
+  if (clip === "gallop-loop") {
+    return targetMode === "walk" ? "gallop-to-walk" : null;
+  }
+
+  return targetMode === "walk" ? "walk-loop" : "gallop-loop";
+}
+
+function shouldLoopHorseClip(clip: HorseClip, targetMode: GaitMode) {
+  return (
+    (clip === "walk-loop" && targetMode === "walk") ||
+    (clip === "gallop-loop" && targetMode === "gallop")
+  );
+}
 
 type PressureBlob = {
   x: number;
@@ -191,6 +250,8 @@ function App() {
 
         <div className="panel-grid">
           <HorsePanel
+            gallopLoopSrc={horseGallopLoopVideo}
+            gallopToWalkSrc={horseGallopToWalkVideo}
             mode={simulation.mode}
             status={simulation.status}
             walkLoopSrc={horseWalkLoopVideo}
@@ -267,7 +328,7 @@ function TopBar({
           <span className="wordmark-mark" aria-hidden="true" />
           <div>
             <p>Vetter</p>
-            <p className="muted-line">{mode.toUpperCase()} DEMO {muted ? "MUTED" : "LIVE"}</p>
+            <p className="muted-line">{mode.toUpperCase()} DEMO</p>
           </div>
         </div>
       </div>
@@ -285,78 +346,159 @@ function StatusPill({ status }: { status: StatusLevel }) {
 }
 
 function HorsePanel({
+  gallopLoopSrc,
+  gallopToWalkSrc,
   mode,
   status,
   walkLoopSrc,
   walkToGallopSrc,
 }: {
+  gallopLoopSrc: string;
+  gallopToWalkSrc: string;
   mode: GaitMode;
   status: StatusLevel;
   walkLoopSrc: string;
   walkToGallopSrc: string;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [activeClip, setActiveClip] = useState<"walk-loop" | "walk-to-gallop">("walk-loop");
+  const videoRefs = useRef<Array<HTMLVideoElement | null>>([]);
+  const [activeClip, setActiveClip] = useState<HorseClip>("walk-loop");
+  const [activeLayer, setActiveLayer] = useState<HorseVideoLayerIndex>(0);
+  const [pendingSwitch, setPendingSwitch] = useState<{
+    clip: HorseClip;
+    layer: HorseVideoLayerIndex;
+    token: number;
+  } | null>(null);
+  const [videoLayers, setVideoLayers] = useState<[HorseVideoLayer, HorseVideoLayer]>(() => [
+    { clip: "walk-loop", src: walkLoopSrc, token: 0 },
+    { clip: "walk-loop", src: walkLoopSrc, token: 1 },
+  ]);
   const activeClipRef = useRef(activeClip);
+  const activeLayerRef = useRef(activeLayer);
+  const modeRef = useRef(mode);
+  const switchTokenRef = useRef(2);
+
+  const clipSources = useMemo<Record<HorseClip, string>>(
+    () => ({
+      "gallop-loop": gallopLoopSrc,
+      "gallop-to-walk": gallopToWalkSrc,
+      "walk-loop": walkLoopSrc,
+      "walk-to-gallop": walkToGallopSrc,
+    }),
+    [gallopLoopSrc, gallopToWalkSrc, walkLoopSrc, walkToGallopSrc]
+  );
 
   useEffect(() => {
     activeClipRef.current = activeClip;
   }, [activeClip]);
 
-  const playActiveClip = useCallback(() => {
-    const video = videoRef.current;
-
-    if (!video) {
-      return;
-    }
-
-    video.load();
-    void video.play().catch(() => {});
-  }, []);
+  useEffect(() => {
+    activeLayerRef.current = activeLayer;
+  }, [activeLayer]);
 
   useEffect(() => {
-    if (mode === "walk" && activeClip === "walk-to-gallop" && videoRef.current?.ended) {
-      setActiveClip("walk-loop");
-    }
-  }, [activeClip, mode]);
-
-  useEffect(() => {
-    playActiveClip();
-  }, [activeClip, playActiveClip]);
-
-  const handleVideoEnded = useCallback(() => {
-    if (activeClipRef.current === "walk-loop") {
-      if (mode === "gallop") {
-        setActiveClip("walk-to-gallop");
-      }
-
-      return;
-    }
-
-    if (mode === "walk") {
-      setActiveClip("walk-loop");
-    }
+    modeRef.current = mode;
   }, [mode]);
 
-  const activeVideoSrc =
-    activeClip === "walk-loop" ? walkLoopSrc : walkToGallopSrc;
-  const shouldLoop =
-    activeClip === "walk-loop" && mode === "walk";
+  useEffect(() => {
+    const activeVideo = videoRefs.current[activeLayer];
+
+    if (activeVideo) {
+      void activeVideo.play().catch(() => {});
+    }
+  }, [activeClip, activeLayer]);
+
+  const prepareClipSwitch = useCallback((clip: HorseClip) => {
+    const nextLayer = activeLayerRef.current === 0 ? 1 : 0;
+    const token = switchTokenRef.current;
+    switchTokenRef.current += 1;
+
+    setVideoLayers((currentLayers) => {
+      const nextLayers: [HorseVideoLayer, HorseVideoLayer] = [...currentLayers];
+      nextLayers[nextLayer] = {
+        clip,
+        src: clipSources[clip],
+        token,
+      };
+      return nextLayers;
+    });
+    setPendingSwitch({ clip, layer: nextLayer, token });
+  }, [clipSources]);
+
+  useEffect(() => {
+    if (!pendingSwitch) {
+      return;
+    }
+
+    const incomingLayer = videoLayers[pendingSwitch.layer];
+    const incomingVideo = videoRefs.current[pendingSwitch.layer];
+    const outgoingVideo = videoRefs.current[activeLayerRef.current];
+
+    if (!incomingVideo || incomingLayer.token !== pendingSwitch.token) {
+      return;
+    }
+
+    let cancelled = false;
+    let revealed = false;
+    const revealIncomingVideo = () => {
+      if (cancelled || revealed) {
+        return;
+      }
+
+      revealed = true;
+      incomingVideo.loop = shouldLoopHorseClip(pendingSwitch.clip, modeRef.current);
+      void incomingVideo.play().catch(() => {});
+      setActiveLayer(pendingSwitch.layer);
+      setActiveClip(pendingSwitch.clip);
+      setPendingSwitch(null);
+
+      window.setTimeout(() => {
+        if (outgoingVideo) {
+          outgoingVideo.pause();
+        }
+      }, VIDEO_SWAP_SETTLE_MS);
+    };
+
+    const handleReady = () => revealIncomingVideo();
+
+    incomingVideo.pause();
+    incomingVideo.currentTime = 0;
+    incomingVideo.load();
+
+    if (incomingVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      revealIncomingVideo();
+    } else {
+      incomingVideo.addEventListener("loadeddata", handleReady, { once: true });
+      incomingVideo.addEventListener("canplay", handleReady, { once: true });
+    }
+
+    return () => {
+      cancelled = true;
+      incomingVideo.removeEventListener("loadeddata", handleReady);
+      incomingVideo.removeEventListener("canplay", handleReady);
+    };
+  }, [pendingSwitch, videoLayers]);
+
+  const handleVideoEnded = useCallback((layer: HorseVideoLayerIndex) => {
+    if (layer !== activeLayerRef.current || pendingSwitch) {
+      return;
+    }
+
+    const nextClip = getNextHorseClip(activeClipRef.current, modeRef.current);
+
+    if (nextClip) {
+      prepareClipSwitch(nextClip);
+    }
+  }, [pendingSwitch, prepareClipSwitch]);
 
   return (
     <section className="panel horse-panel">
       <div className="panel-heading">
         <h2>3D Horse Simulation</h2>
-        <span className="panel-hint panel-hint--icon" aria-hidden="true">?</span>
       </div>
 
       <div className="horse-panel-content">
         <div className="horse-sidebar">
-          <StatCard
-            label="Sensor Nodes Active"
-            value="6"
-            accent="cyan"
-          />
+          <DeviceStatusCard />
           <StatCard
             label="Current Gait"
             value={mode === "walk" ? "Walk" : "Gallop"}
@@ -366,24 +508,117 @@ function HorsePanel({
 
         <div className="horse-video-frame">
           <div className="horse-video-shell">
-            <video
-              autoPlay
-              className="horse-video"
-              key={activeClip}
-              loop={shouldLoop}
-              muted
-              onEnded={handleVideoEnded}
-              playsInline
-              preload="auto"
-              ref={videoRef}
-              src={activeVideoSrc}
-            />
+            {HORSE_VIDEO_LAYERS.map((layer) => {
+              const videoLayer = videoLayers[layer];
+              const isActive = layer === activeLayer;
+
+              return (
+                <video
+                  aria-hidden={!isActive}
+                  autoPlay={isActive}
+                  className={`horse-video ${isActive ? "horse-video--active" : "horse-video--buffer"}`}
+                  key={layer}
+                  loop={isActive && shouldLoopHorseClip(videoLayer.clip, mode)}
+                  muted
+                  onEnded={() => handleVideoEnded(layer)}
+                  playsInline
+                  preload="auto"
+                  ref={(element) => {
+                    videoRefs.current[layer] = element;
+                  }}
+                  src={videoLayer.src}
+                />
+              );
+            })}
             <div className="horse-grid-overlay" />
             <div className="horse-vignette" />
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function DeviceStatusCard() {
+  return (
+    <div className="device-status-card inset-panel">
+      <div className="device-status-heading">
+        <span className="micro-label">Device Status</span>
+        <span className="device-link-pill">
+          <StatusIcon name="bluetooth" />
+          Linked
+        </span>
+      </div>
+
+      <div className="device-status-list">
+        {DEVICE_STATUS_ITEMS.map((item) => (
+          <div className="device-row" key={item.id}>
+            <span className="device-row-icon" aria-hidden="true">
+              <StatusIcon name={item.icon} />
+            </span>
+
+            <div className="device-row-body">
+              <div className="device-row-title">
+                <span>{item.label}</span>
+                <span className="device-chip">
+                  <StatusIcon name="battery" />
+                  {item.battery}%
+                </span>
+              </div>
+
+              <div className="device-row-meta">
+                <span>{item.detail}</span>
+                <span className="device-chip device-chip--ble">
+                  <StatusIcon name="bluetooth" />
+                  BLE
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatusIcon({ name }: { name: DeviceIconName }) {
+  if (name === "battery") {
+    return (
+      <svg className="status-icon" aria-hidden="true" viewBox="0 0 20 20">
+        <rect x="2.5" y="6" width="13" height="8" rx="2" />
+        <path d="M16.5 8.2 h1.4 v3.6 h-1.4" />
+        <rect className="status-icon-fill" x="4.4" y="7.9" width="8.4" height="4.2" rx="1.1" />
+      </svg>
+    );
+  }
+
+  if (name === "bluetooth") {
+    return (
+      <svg className="status-icon" aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M9 2.8 l5 4.2 -4 3 4 3 -5 4.2 V2.8 Z" />
+        <path d="M5.2 6.1 l8.4 7.8" />
+        <path d="M5.2 13.9 l8.4 -7.8" />
+      </svg>
+    );
+  }
+
+  if (name === "girth") {
+    return (
+      <svg className="status-icon status-icon--device" aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M4.1 10.2 C4.1 5.8 7 3.4 10 3.4 c3 0 5.9 2.4 5.9 6.8" />
+        <path d="M5.5 10.2 c0 3.2 2 5.5 4.5 5.5 s4.5 -2.3 4.5 -5.5" />
+        <path d="M7.6 9.8 h4.8" />
+        <path d="M8.8 12.1 h2.4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="status-icon status-icon--device" aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M10 2.8 C13.2 2.8 15.7 5.1 16.2 8.7 c0.5 3.4 -0.8 6.5 -3.6 8.1 -1.7 1 -3.5 1 -5.2 0 -2.8 -1.6 -4.1 -4.7 -3.6 -8.1 C4.3 5.1 6.8 2.8 10 2.8 Z" />
+      <path d="M7.5 10.5 c-0.4 2 0.2 3.4 2.5 4.1 2.3 -0.7 2.9 -2.1 2.5 -4.1" />
+      <path d="M10 7.2 v5.1" />
+    </svg>
   );
 }
 
@@ -889,7 +1124,7 @@ function AlertPanel({
         </div>
 
         <div className="summary-card inset-panel">
-          <span className="micro-label">AI Narration Summary</span>
+          <span className="micro-label">AI Summary</span>
           <div className="summary-card__copy">
             {summaryLines.map((line) => (
               <p key={line}>{line}</p>
