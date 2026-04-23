@@ -1,12 +1,16 @@
 import {
+  useCallback,
   startTransition,
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
+  useState,
 } from "react";
 import { interpolateRgbBasis } from "d3-interpolate";
 import { scaleSequential } from "d3-scale";
-import horseVideo from "../Horse_Treadmill_Animation_Generated_noaudio.mp4";
+import horseGallopStartVideo from "../Horse_Gallop_Start.mp4";
+import horseWalkLoopVideo from "../Horse_Treadmill_Animation_Generated_noaudio.mp4";
 import {
   type EventItem,
   type GaitMode,
@@ -189,7 +193,8 @@ function App() {
           <HorsePanel
             mode={simulation.mode}
             status={simulation.status}
-            videoSrc={horseVideo}
+            walkLoopSrc={horseWalkLoopVideo}
+            walkToGallopSrc={horseGallopStartVideo}
           />
 
           <VitalsPanel
@@ -282,12 +287,62 @@ function StatusPill({ status }: { status: StatusLevel }) {
 function HorsePanel({
   mode,
   status,
-  videoSrc,
+  walkLoopSrc,
+  walkToGallopSrc,
 }: {
   mode: GaitMode;
   status: StatusLevel;
-  videoSrc: string;
+  walkLoopSrc: string;
+  walkToGallopSrc: string;
 }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [activeClip, setActiveClip] = useState<"walk-loop" | "walk-to-gallop">("walk-loop");
+  const activeClipRef = useRef(activeClip);
+
+  useEffect(() => {
+    activeClipRef.current = activeClip;
+  }, [activeClip]);
+
+  const playActiveClip = useCallback(() => {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    video.load();
+    void video.play().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (mode === "walk" && activeClip === "walk-to-gallop" && videoRef.current?.ended) {
+      setActiveClip("walk-loop");
+    }
+  }, [activeClip, mode]);
+
+  useEffect(() => {
+    playActiveClip();
+  }, [activeClip, playActiveClip]);
+
+  const handleVideoEnded = useCallback(() => {
+    if (activeClipRef.current === "walk-loop") {
+      if (mode === "gallop") {
+        setActiveClip("walk-to-gallop");
+      }
+
+      return;
+    }
+
+    if (mode === "walk") {
+      setActiveClip("walk-loop");
+    }
+  }, [mode]);
+
+  const activeVideoSrc =
+    activeClip === "walk-loop" ? walkLoopSrc : walkToGallopSrc;
+  const shouldLoop =
+    activeClip === "walk-loop" && mode === "walk";
+
   return (
     <section className="panel horse-panel">
       <div className="panel-heading">
@@ -314,10 +369,14 @@ function HorsePanel({
             <video
               autoPlay
               className="horse-video"
-              loop
+              key={activeClip}
+              loop={shouldLoop}
               muted
+              onEnded={handleVideoEnded}
               playsInline
-              src={videoSrc}
+              preload="auto"
+              ref={videoRef}
+              src={activeVideoSrc}
             />
             <div className="horse-grid-overlay" />
             <div className="horse-vignette" />

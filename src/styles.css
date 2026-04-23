@@ -250,7 +250,7 @@ select {
   gap: var(--frame-gap);
   min-height: 0;
   grid-template-columns: 1.55fr 1fr;
-  grid-template-rows: minmax(0, 1.46fr) minmax(220px, 0.96fr);
+  grid-template-rows: minmax(0, 1.53fr) minmax(220px, 0.96fr);
   grid-template-areas:
     "horse vitals"
     "hoof alert";
