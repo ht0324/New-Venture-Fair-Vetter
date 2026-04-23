@@ -69,6 +69,14 @@ type HorseVideoLayer = {
   token: number;
 };
 type DeviceIconName = "battery" | "bluetooth" | "girth" | "hoof";
+type FullscreenHostElement = HTMLDivElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+};
 
 const DEVICE_STATUS_ITEMS: Array<{
   id: string;
@@ -114,6 +122,52 @@ function shouldLoopHorseClip(clip: HorseClip, targetMode: GaitMode) {
     (clip === "walk-loop" && targetMode === "walk") ||
     (clip === "gallop-loop" && targetMode === "gallop")
   );
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
+async function toggleFullscreen(element: FullscreenHostElement | null) {
+  if (!element) {
+    return;
+  }
+
+  const fullscreenDocument = document as FullscreenDocument;
+  const fullscreenElement =
+    fullscreenDocument.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
+
+  try {
+    if (fullscreenElement) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (fullscreenDocument.webkitExitFullscreen) {
+        await fullscreenDocument.webkitExitFullscreen();
+      }
+      return;
+    }
+
+    if (element.requestFullscreen) {
+      try {
+        await element.requestFullscreen({ navigationUI: "hide" });
+      } catch {
+        await element.requestFullscreen();
+      }
+    } else if (element.webkitRequestFullscreen) {
+      await element.webkitRequestFullscreen();
+    }
+  } catch {
+    // Ignore transient browser gesture or fullscreen API failures.
+  }
 }
 
 type PressureBlob = {
@@ -213,9 +267,20 @@ function App() {
   const simulation = useDashboardSimulation();
   const deferredMetrics = useDeferredValue(simulation.metrics);
   const { reset, setMode, setPhysiologyProfile, toggleMute } = simulation;
+  const dashboardFullscreenRef = useRef<FullscreenHostElement | null>(null);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (
+        event.isComposing ||
+        isEditableTarget(event.target) ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
       const key = event.key.toLowerCase();
       const gaitShortcut = GAIT_CODE_SHORTCUTS[event.code] ?? GAIT_KEY_SHORTCUTS[key];
 
@@ -227,6 +292,9 @@ function App() {
         startTransition(() => reset());
       } else if (key === "m") {
         toggleMute();
+      } else if ((event.code === "KeyF" || key === "f") && !event.repeat) {
+        event.preventDefault();
+        void toggleFullscreen(dashboardFullscreenRef.current);
       }
     }
 
@@ -239,7 +307,7 @@ function App() {
     <main className="app-shell">
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
-      <section className="dashboard-frame">
+      <section className="dashboard-frame" ref={dashboardFullscreenRef}>
         <TopBar
           mode={simulation.mode}
           muted={simulation.muted}
@@ -265,6 +333,7 @@ function App() {
 
           <HoofForcePanel
             hoofPressures={simulation.hoofPressures}
+            gaitBlend={simulation.gaitBlend}
             strideFrequencyLabel={simulation.strideFrequencyLabel}
             symmetryScore={simulation.symmetryScore}
             contactSummary={simulation.contactSummary}
@@ -740,6 +809,7 @@ function SparklineChart({
 
 function HoofForcePanel({
   contactSummary,
+  gaitBlend,
   hoofPressures,
   mode,
   strideFrequencyLabel,
@@ -748,6 +818,7 @@ function HoofForcePanel({
   symmetryScore,
 }: {
   contactSummary: string;
+  gaitBlend: number;
   hoofPressures: HoofPressures;
   mode: GaitMode;
   strideFrequencyLabel: string;
@@ -795,6 +866,7 @@ function HoofForcePanel({
         </dl>
 
         <StridePhaseTimeline
+          gaitBlend={gaitBlend}
           mode={mode}
           stridePhase={stridePhase}
           stridePattern={stridePattern}
@@ -805,10 +877,12 @@ function HoofForcePanel({
 }
 
 function StridePhaseTimeline({
+  gaitBlend,
   mode,
   stridePhase,
   stridePattern,
 }: {
+  gaitBlend: number;
   mode: GaitMode;
   stridePhase: number;
   stridePattern: StridePattern;
@@ -830,8 +904,9 @@ function StridePhaseTimeline({
 
         {HOOF_ORDER.map((hoof) => {
           const window = stridePattern[hoof];
-          const segments = buildStrideDisplaySegments(window, mode);
+          const segments = buildStrideDisplaySegments(window, gaitBlend);
           const active = isStrideWindowActive(window, stridePhase);
+          const continuationReveal = getStrideContinuationReveal(gaitBlend);
 
           return (
             <div
@@ -843,7 +918,7 @@ function StridePhaseTimeline({
                 {segments.map((segment, index) => (
                   <span
                     className={`phase-lane__window${
-                      segment.kind === "echo" ? " phase-lane__window--echo" : ""
+                      segment.kind === "continuation" ? " phase-lane__window--continuation" : ""
                     }${
                       active && segment.kind === "primary"
                         ? " phase-lane__window--active"
@@ -853,6 +928,20 @@ function StridePhaseTimeline({
                     style={{
                       left: `${segment.start * 100}%`,
                       width: `${Math.max(2, (segment.end - segment.start) * 100)}%`,
+                      opacity:
+                        segment.kind === "continuation"
+                          ? continuationReveal * 0.52
+                          : undefined,
+                      transform:
+                        segment.kind === "continuation"
+                          ? `scaleX(${continuationReveal})`
+                          : undefined,
+                      transformOrigin:
+                        segment.kind === "continuation"
+                          ? mode === "walk"
+                            ? "right center"
+                            : "left center"
+                          : undefined,
                     }}
                   />
                 ))}
@@ -871,29 +960,33 @@ function StridePhaseTimeline({
   );
 }
 
-function buildStrideDisplaySegments(window: StrideWindow, mode: GaitMode) {
+function buildStrideDisplaySegments(window: StrideWindow, gaitBlend: number) {
   const primarySegments = expandStrideSegments(window).map((segment) => ({
     ...segment,
     kind: "primary" as const,
   }));
 
-  if (mode !== "gallop") {
+  if (gaitBlend < 0.02) {
     return primarySegments;
   }
 
-  const cycleStart = normalizePhase(window.start);
-  const cycleEnd = window.end <= 1 ? window.end : window.end - 1;
-  const cycleSpan = cycleEnd >= cycleStart ? cycleEnd - cycleStart : cycleEnd + 1 - cycleStart;
-  const echoOffset = Math.max(0.4, 1 - cycleSpan);
-  const echoSegments = expandStrideSegments({
-    start: cycleStart + echoOffset,
-    end: cycleStart + echoOffset + cycleSpan,
-  }).map((segment) => ({
-    ...segment,
-    kind: "echo" as const,
-  }));
+  const duration = window.end - window.start;
+  const continuationSegments = expandStrideSegments({
+    start: window.start + 0.5,
+    end: window.start + 0.5 + duration,
+  })
+    .map((segment) => ({
+      start: Math.max(0.5, segment.start),
+      end: segment.end,
+      kind: "continuation" as const,
+    }))
+    .filter((segment) => segment.end > segment.start && segment.end > 0.5);
 
-  return [...primarySegments, ...echoSegments];
+  return [...primarySegments, ...continuationSegments];
+}
+
+function getStrideContinuationReveal(gaitBlend: number) {
+  return Math.min(1, Math.max(0, (gaitBlend - 0.08) / 0.72));
 }
 
 function expandStrideSegments(window: StrideWindow) {

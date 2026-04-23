@@ -68,6 +68,7 @@ export interface SimulationState {
   metrics: MetricState[];
   hoofLoads: HoofLoads;
   hoofPressures: HoofPressures;
+  gaitBlend: number;
   stridePhase: number;
   stridePattern: StridePattern;
   strideFrequencyLabel: string;
@@ -894,6 +895,7 @@ export function useDashboardSimulation(): SimulationState {
     metrics,
     hoofLoads,
     hoofPressures,
+    gaitBlend,
     stridePhase,
     stridePattern,
     strideFrequencyLabel,
