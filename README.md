@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="./media/new-venture-fair-vetter-demo.mp4">Open the compressed demo video</a>
+  <a href="./media/new-venture-fair-vetter-demo.mp4">Open the demo video</a>
 </p>
 
 New Venture Fair Vetter is a polished React/Vite dashboard prototype built for the UCSB 2026 New Venture Fair. The demo presents Vetter as a live equine monitoring system: a horse-motion centerpiece, simulated vitals, hoof pressure maps, sensor status, operator controls, and alert narration designed to read clearly on a fair display.
@@ -16,22 +16,7 @@ The [New Venture Fair event page](https://innovation.ucsb.edu/events/2026-new-ve
 
 ## Demo Media
 
-The original screen recording lives outside this repository at:
-
-```text
-/Users/huntae/Documents/Projects/archive/Vetter/Demo Video.mov
-```
-
-That file is 223 MB, so the README uses a compressed MP4 checked into `media/` instead:
-
-- `media/new-venture-fair-vetter-demo.mp4`: 3.8 MB, 40.5 seconds, 1920x1202 H.264
-- `media/new-venture-fair-vetter-demo-poster.jpg`: lightweight poster image for README preview
-
-Compression command used:
-
-```sh
-ffmpeg -i "Demo Video.mov" -vf "scale='min(1920,iw)':-2" -c:v libx264 -preset slow -crf 28 -pix_fmt yuv420p -movflags +faststart -an media/new-venture-fair-vetter-demo.mp4
-```
+The demo video and poster image are kept in `media/` so the project preview works directly from the repository.
 
 ## Run Locally
 
