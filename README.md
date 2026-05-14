@@ -1,14 +1,6 @@
 # New Venture Fair Vetter
 
-<p align="center">
-  <a href="./media/new-venture-fair-vetter-demo.mp4">
-    <img src="./media/new-venture-fair-vetter-demo-poster.jpg" alt="New Venture Fair Vetter demo" width="900">
-  </a>
-</p>
-
-<p align="center">
-  <a href="./media/new-venture-fair-vetter-demo.mp4">Open the demo video</a>
-</p>
+https://github.com/user-attachments/assets/5a111769-c429-4141-99a3-289aeffdf141
 
 New Venture Fair Vetter is a polished React/Vite dashboard prototype built for the UCSB 2026 New Venture Fair. The demo presents Vetter as a live equine monitoring system: a horse-motion centerpiece, simulated vitals, hoof pressure maps, sensor status, operator controls, and alert narration designed to read clearly on a fair display.
 
